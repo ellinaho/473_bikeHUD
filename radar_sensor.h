@@ -100,10 +100,6 @@ radar_status_t radar_configure(float max_range_m, float fov_deg);
 
 /**
  * @brief Groups raw point cloud reflections into tracked targets
- * @param[in]  points      array of detected points
- * @param[in]  num_points  total points
- * @param[in]  config      configure the distance and velocity thresholds
- * @param[out] frame       where the frame is store
  */
 radar_status_t radar_cluster_points(const radar_point_t *points, uint16_t num_points, const radar_cluster_config_t *config, radar_frame_t *frame);
 
