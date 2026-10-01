@@ -1,3 +1,7 @@
+"""
+Function declarations for encoder, ran on raspberry pi
+"""
+
 from enum import IntEnum
 
 class HUDMode(IntEnum):
