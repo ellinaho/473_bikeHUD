@@ -24,7 +24,7 @@ class HUDEncoder:
         self.time_pressed = 0.0
         self.long_press_thresh = 0.5  # seconds
 
-    def encoder_init(self, target_names: list = ["rotary", "enter"]):
+    def encoder_init(self, target_names: list = ["rotary@", "button@"]):
         """
         Find and attach device 
         """
@@ -96,7 +96,7 @@ class HUDEncoder:
         if action == HUDAction.LONG_PRESS:
             return "toggle_display"
         elif action == HUDAction.SHORT_PRESS:
-            return "click_onlyD"
+            return "click_only"
             
         return "NONE"
 
