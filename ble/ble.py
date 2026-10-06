@@ -1,44 +1,37 @@
-"""
-Python function declarations for BLE, ran on Raspberry Pi
-receives radar targets from the radar unit (ESP32)
-"""
+import asyncio
+import struct
+from bleak import BleakClient
 
-from dataclasses import dataclass
+ESP32_MAC = "XX:XX:XX:XX:XX:XX"
+CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8"
 
-@dataclass
-class RadarTarget:
-    target_id: int      # id for each unique target
-    tier: int           # alert tier, 0 = none, 1 = slow, 2 = medium, 3 = fast
-    dist: float         # distance from rider in m
-    speed: int          # approaching speed in kph, + is toward rider
-    angle: int          # angle of arrival in degrees
+# Shared dictionary prepared for future integration
+telem_data = {"f1": 0.0, "f2": 0.0, "i1": 0}
 
+def notification_handler(sender, data):
+    f1, f2, i1 = struct.unpack('<ffi', data)
 
-class HelmetBLE:
-    def ble_init(self, device_name: str = "BikeHUD-Radar"):
-        """
-        - scan for radar unit by name and connect to it
-        - subscribe to radar packet notifications
-        """
-        pass
+    telem_data["f1"] = f1
+    telem_data["f2"] = f2
+    telem_data["i1"] = i1
 
-    def is_connected(self):
-        """
-        - returns true if radar unit is connected
-        """
-        pass
+async def main():
+    print(f"Connecting to {ESP32_MAC}...")
+    
+    async with BleakClient(ESP32_MAC) as client:
+        print("Connected! Subscribing to notifications...")
+        await client.start_notify(CHARACTERISTIC_UUID, notification_handler)
+        
+        try:
+            # standalone loop
+            while True:
+                print(f"Current State -> {telem_data}")
+                await asyncio.sleep(1.0)
+                
+        except KeyboardInterrupt:
+            print("\nDisconnecting...")
+            
+        await client.stop_notify(CHARACTERISTIC_UUID)
 
-    def parse_packet(self, data: bytes):
-        """
-        - unpack raw packet bytes from radar unit (packet format in ble.h)
-        - first byte is number of targets, then 6 bytes per target
-        - returns list of RadarTarget, empty list if packet is bad
-        """
-        pass
-
-    def get_targets(self):
-        """
-        - returns list of RadarTarget from the most recent packet
-        - returns empty list if not connected or no packet received yet
-        """
-        pass
+if __name__ == "__main__":
+    asyncio.run(main())
