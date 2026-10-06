@@ -6,14 +6,14 @@ ESP32_MAC = "XX:XX:XX:XX:XX:XX"
 CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8"
 
 # Shared dictionary prepared for future integration
-telem_data = {"f1": 0.0, "f2": 0.0, "i1": 0}
+telem_data = {"i1": 0.0, "i2": 0.0, "i3": 0}
 
 def notification_handler(sender, data):
-    f1, f2, i1 = struct.unpack('<ffi', data)
+    i1, i2, i3 = struct.unpack('<iii', data)
 
-    telem_data["f1"] = f1
-    telem_data["f2"] = f2
     telem_data["i1"] = i1
+    telem_data["i2"] = i2
+    telem_data["i3"] = i3
 
 async def main():
     print(f"Connecting to {ESP32_MAC}...")
