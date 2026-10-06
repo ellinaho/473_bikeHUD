@@ -2,6 +2,13 @@
 
 `gps.py` reads the PA1010D GPS over I2C on the Raspberry Pi and returns speed, pace, distance, lat/lon, heading, and fix validity as a `GPSData` object.
 
+## Dependencies
+
+- Python package: `smbus2`
+- Pi setting: I2C enabled
+
+Everything else is from the Python standard library.
+
 ## Setup
 
 Wiring: SDA to pin 3, SCL to pin 5, 3.3V, GND. GPS is at I2C address `0x10`.
