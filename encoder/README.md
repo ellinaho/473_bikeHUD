@@ -3,6 +3,8 @@
 ## Installing Dependencies
 `sudo apt-get install python3-evdev`
 
+`pip install evdev`
+
 ## Kernal Overlay
 ```
 dtoverlay=rotary-encoder,pin_a=23,pin_b=24,relative_axis=1
