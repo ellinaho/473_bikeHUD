@@ -15,3 +15,8 @@ dtoverlay=gpio-key,gpio=25,keycode=28,label="ENTER"
 `sudo usermod -a -G input $USER`
 
 Then `sudo reboot`. 
+
+## Hardware
+clk to gpio23
+dt to gpio24
+sw to gpio25
