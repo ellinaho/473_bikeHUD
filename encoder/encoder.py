@@ -5,6 +5,7 @@ try:
 except ImportError:
     raise ImportError("Install with: pip install evdev")
 
+# TODO: Depends on how many modes we actually have
 class HUDMode(IntEnum):
     MODE0 = 0
     MODE1 = 1
@@ -20,9 +21,9 @@ class HUDAction(IntEnum):
 
 class HUDEncoder:
     def __init__(self):
-        self.devices = []
-        self.time_pressed = 0.0
-        self.long_press_thresh = 0.5  # seconds
+        self.devices = []       # button is one device, spinning is one device
+        self.time_pressed = 0.0     # logs when the button was first pressed
+        self.long_press_thresh = 0.5  # TODO: what counts as long press
 
     def encoder_init(self, target_names: list = ["rotary@", "button@"]):
         """
@@ -32,10 +33,10 @@ class HUDEncoder:
         
         for path in device_paths:
             dev = evdev.InputDevice(path)
-            # if device names contains rotary or enter 
+            # if device names contains rotary or button
             if any(target.lower() in dev.name.lower() for target in target_names):
                 self.devices.append(dev)
-                print(f"connected to {dev.name} -> {dev.path}")
+                print(f"Connected to {dev.name} -> {dev.path}")
                 
         if not self.devices:
             raise FileNotFoundError("cannot find encoder! check hardware or dtoverlay")
@@ -54,7 +55,7 @@ class HUDEncoder:
         return all_events
 
     def get_encoder_action(self) -> HUDAction:
-        """translate encoder input"""
+        """translate encoder event to encoder action"""
         events = self.read_raw_encoder()
         action = HUDAction.NONE
         
@@ -118,7 +119,8 @@ if __name__ == "__main__":
     try:
         while True:
             action = encoder.get_encoder_action()
-            
+
+            # in system integration, will have global variable MODE and like ON/OFF
             if action != HUDAction.NONE:
                 new_mode = encoder.update_HUD_mode(curr_mode, action)
                 if new_mode != curr_mode:

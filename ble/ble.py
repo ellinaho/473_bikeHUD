@@ -2,30 +2,31 @@ import asyncio
 import struct
 from bleak import BleakClient
 
+# TODO: SETUP ESP32 CONNECTION HERE
 ESP32_MAC = "XX:XX:XX:XX:XX:XX"
 CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8"
 
-# Shared dictionary prepared for future integration
-telem_data = {"i1": 0.0, "i2": 0.0, "i3": 0}
+# TODO: based on what radar has to send
+radar_data = {"tier": 0, "dist": 0, "speed": 0, "angle": 0}
 
-def notification_handler(sender, data):
-    i1, i2, i3 = struct.unpack('<iii', data)
+def handle_radar_packet(sender, data):
+    tier, dist, speed, angle = struct.unpack('<iiii', data)
 
-    telem_data["i1"] = i1
-    telem_data["i2"] = i2
-    telem_data["i3"] = i3
+    radar_data["tier"] = tier
+    radar_data["dist"] = dist
+    radar_data["speed"] = speed
+    radar_data["angle"] = angle
 
-async def main():
-    print(f"Connecting to {ESP32_MAC}...")
+async def main(): # async makes ble nonblocking
+    print(f"Connecting to ESP32: {ESP32_MAC}...")
     
     async with BleakClient(ESP32_MAC) as client:
-        print("Connected! Subscribing to notifications...")
-        await client.start_notify(CHARACTERISTIC_UUID, notification_handler)
+        print("Connected! Listening to radar packets...")
+        await client.start_notify(CHARACTERISTIC_UUID, handle_radar_packet)
         
         try:
-            # standalone loop
             while True:
-                print(f"Current State -> {telem_data}")
+                print(f"Radar Data : {radar_data}")
                 await asyncio.sleep(1.0)
                 
         except KeyboardInterrupt:
