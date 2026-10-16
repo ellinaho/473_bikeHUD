@@ -2,30 +2,26 @@
 
 `gps.py` reads the PA1010D GPS over I2C on the Raspberry Pi and returns speed, pace, distance, lat/lon, heading, and fix validity as a `GPSData` object.
 
-## Dependencies
-
-- Python package: `smbus2`
-- Pi setting: I2C enabled
-
-Everything else is from the Python standard library.
+The GPS needs to be exposed to the sky to get valid readings. 
 
 ## Setup
 
-Wiring: SDA to pin 3, SCL to pin 5, 3.3V, GND. GPS is at I2C address `0x10`.
+### Wiring
+GPS SDA <> Pi SDA (Pin 3)
+GPS SCL <> Pi SCL (Pin 5)
+GPS Vin <> Pi 3.3V (Pin 1)
+GPS GND <> Pi GND (Pin 6)
+GPS has I2C address 0x10
 
+### Installing Dependencies 
 ```bash
 sudo raspi-config nonint do_i2c 0
 sudo apt install -y python3-smbus2 i2c-tools
 i2cdetect -y 1    # should show 10
+
+# in your venv
+pip install smbus2
 ```
-
-## Run
-
-```bash
-python3 gps.py
-```
-
-Shows `no fix` until satellites are found, which needs a view of the sky.
 
 ## Test
 
@@ -34,6 +30,14 @@ python3 nmea_raw_test.py
 ```
 
 Use this for a basic hardware connection debug test.
+
+## Run
+
+```bash
+python3 gps.py
+```
+
+Shows `no fix` until satellites are found, which needs a view of the sky.
 
 ## Usage
 
