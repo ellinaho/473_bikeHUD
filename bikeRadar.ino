@@ -1,332 +1,219 @@
 #include <Arduino.h>
+#include <string.h>
 #include <math.h>
-#include <BLEDevice.h>
-#include <BLEServer.h>
-#include <BLEUtils.h>
-#if ESP_ARDUINO_VERSION_MAJOR < 3
-#include <BLE2902.h>   // core 3.x adds the notify descriptor automatically
-#endif
-#include "radarConfig.h"
 
-// Two separate radar UARTs: CLI for config, DATA for binary frames
-#define CliSerial  Serial2
-#define DataSerial Serial1
-
-// BLE globals
-BLEServer*         pServer         = nullptr;
-BLECharacteristic* pCharacteristic = nullptr;
-volatile bool      deviceConnected = false;
-
-// TI mmWave sync pattern
-static const uint8_t SYNC_MAGIC_WORD[8] = {0x02, 0x01, 0x04, 0x03, 0x06, 0x05, 0x08, 0x07};
-
-// Frame buffer (everything after the 40-byte header)
-static uint8_t frameBuf[4096];
-
-// Prototypes
-VehicleThreat evaluateThreat(const DetectedObject& obj);
-bool          sendRadarCommand(const char* cmd, uint32_t timeoutMs, bool fatal);
-VehicleThreat parseFrame(const uint8_t* p, size_t len, uint32_t numTLVs);
-void          updateThreatState(const VehicleThreat& best);
-void          processIncomingData();
-void          broadcastThreat(const VehicleThreat& threat);
-
-// ---------------------------------------------------------------------------
-// BLE callbacks
-// ---------------------------------------------------------------------------
-class ServerCallbacks : public BLEServerCallbacks {
-    void onConnect(BLEServer* server) override {
-        deviceConnected = true;
-        Serial.println("BLE client connected (HUD)");
-    }
-    void onDisconnect(BLEServer* server) override {
-        deviceConnected = false;
-        Serial.println("BLE client disconnected");
-        BLEDevice::startAdvertising();   // let the HUD reconnect
-    }
+static const char* RADAR_CONFIG_COMMANDS[] = {
+    "sensorStop",
+    "flushCfg",
+    "dfeDataOutputMode 1",
+    "channelCfg 15 7 0",
+    "adcCfg 2 1",
+    "adcbufCfg -1 0 1 1 1",
+    "profileCfg 0 60 359 7 57.14 0 0 70 1 256 5209 0 0 158",
+    "chirpCfg 0 0 0 0 0 0 0 1",
+    "chirpCfg 1 1 0 0 0 0 0 2",
+    "chirpCfg 2 2 0 0 0 0 0 4",
+    "frameCfg 0 2 16 0 100 1 0",
+    "lowPower 0 0",
+    "guiMonitor -1 1 1 0 0 0 1",
+    "cfarCfg -1 0 2 8 4 3 0 15 1",
+    "cfarCfg -1 1 0 4 2 3 1 15 1",
+    "multiObjBeamForming -1 1 0.5",
+    "clutterRemoval -1 0",
+    "calibDcRangeSig -1 0 -5 8 256",
+    "extendedMaxVelocity -1 0",
+    "lvdsStreamCfg -1 0 0 0",
+    "compRangeBiasAndRxChanPhase 0.0 1 0 -1 0 1 0 -1 0 1 0 -1 0 1 0 -1 0 1 0 -1 0 1 0 -1 0",
+    "measureRangeBiasAndRxChanPhase 0 1.5 0.2",
+    "CQRxSatMonitor 0 3 5 121 0",
+    "CQSigImgMonitor 0 127 4",
+    "analogMonitor 0 0",
+    "aoaFovCfg -1 -90 90 -90 90",
+    "cfarFovCfg -1 0 0 8.92",
+    "cfarFovCfg -1 1 -1 1.00",
+    "calibData 0 0 0",
+    "sensorStart"
 };
 
-// ---------------------------------------------------------------------------
-// Threat evaluation
-// ---------------------------------------------------------------------------
-VehicleThreat evaluateThreat(const DetectedObject& obj) {
-    VehicleThreat t = {0.0f, 0.0f, 0.0f, 99.0f, 0, false};
+static const size_t NUM_CONFIG_COMMANDS = sizeof(RADAR_CONFIG_COMMANDS) / sizeof(RADAR_CONFIG_COMMANDS[0]);
 
-    if (!isfinite(obj.x) || !isfinite(obj.y) || !isfinite(obj.velocity)) return t;
+#define LED_PIN 2
+#define HEADER_SIZE 40
+#define TLV_HEADER_SIZE 8
+#define MAX_PACKET_SIZE 8192
+#define TLV_TYPE_POINT_CLOUD 1
 
-    t.distance      = sqrtf(obj.x * obj.x + obj.y * obj.y);
-    t.angle         = atan2f(obj.x, obj.y) * RAD_TO_DEG;
-    t.approachSpeed = -obj.velocity * 3.6f;   // negative Doppler = closing
+// --- detection parameters --- 
+#define MIN_REAR_DIST_M    0.2f    // Minimum distance (20 cm)
+#define MAX_REAR_DIST_M    10.0f   // Max distance (10 meters)
+#define MAX_LANE_OFFSET_M  6.0f    // Wide field of view across the room
+#define MIN_APPROACH_VEL_MS -0.2f  // closing speed
 
-    // Ignore: behind the sensor plane, too far sideways, too far away,
-    // static, or receding
-    if (obj.y <= 0.0f ||
-        fabsf(obj.x) > MAX_LATERAL_M ||
-        t.distance > MAX_RANGE_M ||
-        t.approachSpeed < MIN_APPROACH_KMH) {
-        t.approachSpeed = 0.0f;
-        return t;
-    }
+static const uint8_t MAGIC_WORD[8] = {0x02, 0x01, 0x04, 0x03, 0x06, 0x05, 0x08, 0x07};
 
-    t.ttc = t.distance / (t.approachSpeed / 3.6f);
+struct __attribute__((packed)) MMWaveFrameHeader {
+    uint8_t magicWord[8];
+    uint32_t version;
+    uint32_t totalPacketLen;
+    uint32_t platform;
+    uint32_t frameNumber;
+    uint32_t timeCpuCycles;
+    uint32_t numDetectedObj;
+    uint32_t numTLVs;
+    uint32_t subFrameNumber;
+};
 
-    // In your path or in the passing lane? The window widens with range because
-    // azimuth error grows with distance.
-    float widen = DIRECT_WIDEN_PER_M * obj.y;
-    t.isDirectPath = (obj.x >= DIRECT_X_MIN_M - widen) &&
-                     (obj.x <= DIRECT_X_MAX_M + widen);
+struct __attribute__((packed)) TLVHeader {
+    uint32_t type;
+    uint32_t length;
+};
 
-    if (t.isDirectPath) {
-        // Direct path: escalate quickly
-        if (t.ttc <= DIRECT_TIER3_TTC_S || t.approachSpeed > DIRECT_TIER3_KMH) {
-            t.threatTier = 3;
-        } else if (t.ttc <= DIRECT_TIER2_TTC_S) {
-            t.threatTier = 2;
-        } else {
-            t.threatTier = 1;
-        }
-    } else {
-        // Passing lane: lower severity, it is bypassing you
-        if (t.ttc <= PASS_TIER2_TTC_S && t.approachSpeed > PASS_TIER2_KMH) {
-            t.threatTier = 2;   // fast pass close by
-        } else {
-            t.threatTier = 1;   // informational
-        }
-    }
-    return t;
-}
+struct __attribute__((packed)) DetectedObject {
+    float x;        // Lateral position (m) [Left < 0 < Right]
+    float y;        // Rear distance (m) [Behind > 0]
+    float z;        // Vertical height (m)
+    float velocity; // Relative speed (m/s) [Negative = Closing in]
+};
 
-// Higher = more important. Severity first, direct path breaks ties.
-// (To make ANY direct threat outrank passing ones, use: direct*4 + tier.)
-static inline uint8_t threatRank(const VehicleThreat& v) {
-    return v.threatTier * 2 + (v.isDirectPath ? 1 : 0);
-}
+struct VehicleThreat {
+    float distance_m;
+    float approach_angle_deg;
+    float closing_speed_mps;
+    bool isValid;
+};
 
-// ---------------------------------------------------------------------------
-// Send one CLI command and wait for the radar's reply
-// ---------------------------------------------------------------------------
-bool sendRadarCommand(const char* cmd, uint32_t timeoutMs, bool fatal) {
-    while (CliSerial.available()) CliSerial.read();   // drop stale bytes
+static uint8_t packetBuffer[MAX_PACKET_SIZE];
+static size_t packetLength = 0;
+static size_t expectedPacketLength = 0;
+static uint8_t syncBuffer[8] = {0};
+static bool collectingPacket = false;
 
-    CliSerial.print(cmd);
-    CliSerial.print('\n');
-
-    String resp;
-    uint32_t start = millis();
-    while (millis() - start < timeoutMs) {
-        while (CliSerial.available()) {
-            resp += (char)CliSerial.read();
-            if (resp.length() > 512) resp.remove(0, 256);
-        }
-        if (resp.indexOf("Done") >= 0 || resp.indexOf("Ignored") >= 0 ||
-            resp.indexOf("Skipped") >= 0) {
-            Serial.printf("OK    : %s\n", cmd);
-            return true;
-        }
-        if (resp.indexOf("Error") >= 0 || resp.indexOf("not recognized") >= 0) {
-            Serial.printf("ERROR : %s\n%s\n", cmd, resp.c_str());
-            return !fatal;
-        }
-        delay(2);
-    }
-    Serial.printf("TIMEOUT: %s (no reply)\n", cmd);
-    return !fatal;
-}
-
-// ---------------------------------------------------------------------------
-// Setup
-// ---------------------------------------------------------------------------
-void setup() {
-    Serial.begin(115200);
-    delay(500);
-
-    // CLI port
-    CliSerial.begin(CLI_BAUD, SERIAL_8N1, CLI_RX_PIN, CLI_TX_PIN);
-
-    // Data port (RX only). Buffer size must be set BEFORE begin().
-    DataSerial.setRxBufferSize(4096);
-    DataSerial.begin(DATA_BAUD, SERIAL_8N1, DATA_RX_PIN, -1);
-    DataSerial.setTimeout(50);   // inter-byte timeout for readBytes()
-
-    delay(1000);
-
-    // 1. Configure radar, stop on first real error
-    Serial.println("Configuring AWR6843...");
-    bool radarOk = true;
+void sendRadarConfiguration() {
+    Serial.println("ESP32_READY");
     for (size_t i = 0; i < NUM_CONFIG_COMMANDS; i++) {
-        bool fatal = (i != 0);   // sensorStop may legitimately complain if already stopped
-        if (!sendRadarCommand(RADAR_CONFIG_COMMANDS[i], 1500, fatal)) {
-            radarOk = false;
-            break;
-        }
+        Serial.println(RADAR_CONFIG_COMMANDS[i]);
+        delay(200);
     }
-    Serial.println(radarOk ? "Radar configured and started."
-                           : "RADAR CONFIG FAILED - check wiring, firmware, and config above.");
-
-    // 2. BLE server
-    BLEDevice::init("BikeRadar_ESP32");
-    pServer = BLEDevice::createServer();
-    pServer->setCallbacks(new ServerCallbacks());
-
-    BLEService* pService = pServer->createService(SERVICE_UUID);
-    pCharacteristic = pService->createCharacteristic(
-        CHARACTERISTIC_UUID,
-        BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
-#if ESP_ARDUINO_VERSION_MAJOR < 3
-    pCharacteristic->addDescriptor(new BLE2902());
-#endif
-    ThreatPacket idle = {0, 0, 0, 0, 255};
-    pCharacteristic->setValue((uint8_t*)&idle, sizeof(idle));
-    pService->start();
-
-    BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
-    pAdvertising->addServiceUUID(SERVICE_UUID);
-    pAdvertising->setScanResponse(true);
-    BLEDevice::startAdvertising();
-
-    Serial.println("System ready. Listening for radar frames and BLE HUD...");
+    Serial.println("CONFIG_SENT");
 }
 
-void loop() {
-    processIncomingData();
-    delay(2);   // yield to the BLE / system tasks
-}
+void processRadarPacket(const uint8_t* data, size_t length) {
+    if (length < HEADER_SIZE) return;
 
-// ---------------------------------------------------------------------------
-// Frame sync + whole-frame read
-// ---------------------------------------------------------------------------
-void processIncomingData() {
-    static uint8_t syncIndex = 0;
+    MMWaveFrameHeader header;
+    memcpy(&header, data, sizeof(header));
 
-    while (DataSerial.available()) {
-        uint8_t b = (uint8_t)DataSerial.read();
+    if (header.totalPacketLen != length || header.numTLVs > 64) return;
 
-        if (b == SYNC_MAGIC_WORD[syncIndex]) {
-            syncIndex++;
-        } else {
-            // The breaking byte may itself start a new sync word
-            syncIndex = (b == SYNC_MAGIC_WORD[0]) ? 1 : 0;
-            continue;
-        }
-        if (syncIndex < MMWAVE_MAGIC_BYTES) continue;
-        syncIndex = 0;
+    size_t offset = HEADER_SIZE;
+    VehicleThreat primaryThreat = {999.0f, 0.0f, 0.0f, false};
 
-        // Read the remaining 32 header bytes
-        uint8_t hdrBytes[MMWAVE_HEADER_BYTES];
-        memcpy(hdrBytes, SYNC_MAGIC_WORD, MMWAVE_MAGIC_BYTES);
-        if (DataSerial.readBytes(hdrBytes + MMWAVE_MAGIC_BYTES,
-                                 MMWAVE_HEADER_BYTES - MMWAVE_MAGIC_BYTES)
-            != MMWAVE_HEADER_BYTES - MMWAVE_MAGIC_BYTES) continue;
+    for (uint32_t t = 0; t < header.numTLVs; t++) {
+        if (offset + TLV_HEADER_SIZE > length) return;
 
-        MMWaveFrameHeader hdr;
-        memcpy(&hdr, hdrBytes, sizeof(hdr));
-
-        // Sanity check, then read the rest of the frame into memory
-        if (hdr.totalPacketLen < MMWAVE_HEADER_BYTES) continue;
-        size_t bodyLen = hdr.totalPacketLen - MMWAVE_HEADER_BYTES;
-        if (bodyLen > sizeof(frameBuf)) continue;   // oversize: resync on next frame
-        if (DataSerial.readBytes(frameBuf, bodyLen) != bodyLen) continue;
-
-        VehicleThreat best = parseFrame(frameBuf, bodyLen, hdr.numTLVs);
-        updateThreatState(best);
-    }
-}
-
-// Parse TLVs from the in-memory frame body, return the most important threat
-VehicleThreat parseFrame(const uint8_t* p, size_t len, uint32_t numTLVs) {
-    VehicleThreat best = {0.0f, 0.0f, 0.0f, 99.0f, 0, false};
-    size_t off = 0;
-
-    for (uint32_t i = 0; i < numTLVs && off + sizeof(TLVHeader) <= len; i++) {
         TLVHeader tlv;
-        memcpy(&tlv, p + off, sizeof(tlv));
-        off += sizeof(tlv);
-        if (tlv.length > len - off) break;   // corrupt frame
+        memcpy(&tlv, data + offset, sizeof(tlv));
+        offset += TLV_HEADER_SIZE;
+
+        if (tlv.length > length - offset) return;
 
         if (tlv.type == TLV_TYPE_POINT_CLOUD) {
-            for (size_t o = 0; o + sizeof(DetectedObject) <= tlv.length;
-                 o += sizeof(DetectedObject)) {
-                DetectedObject obj;
-                memcpy(&obj, p + off + o, sizeof(obj));
-                VehicleThreat t = evaluateThreat(obj);
-                if (t.threatTier == 0) continue;
+            uint32_t objectCount = tlv.length / sizeof(DetectedObject);
 
-                // Higher rank wins; on a tie, the shorter time-to-collision wins
-                if (threatRank(t) > threatRank(best) ||
-                    (threatRank(t) == threatRank(best) && t.ttc < best.ttc)) {
-                    best = t;
+            for (uint32_t i = 0; i < objectCount; i++) {
+                DetectedObject obj;
+                memcpy(&obj, data + offset + i * sizeof(DetectedObject), sizeof(DetectedObject));
+
+                // --- ROOM TESTING THREAT FILTER ---
+                if (obj.y >= MIN_REAR_DIST_M && obj.y <= MAX_REAR_DIST_M && fabs(obj.x) <= MAX_LANE_OFFSET_M) {
+                    if (obj.velocity < MIN_APPROACH_VEL_MS) {
+                        float dist = sqrtf(obj.x * obj.x + obj.y * obj.y);
+                        
+                        if (dist < primaryThreat.distance_m) {
+                            primaryThreat.distance_m = dist;
+                            primaryThreat.approach_angle_deg = atan2f(obj.x, obj.y) * (180.0f / M_PI);
+                            primaryThreat.closing_speed_mps = fabsf(obj.velocity);
+                            primaryThreat.isValid = true;
+                        }
+                    }
                 }
             }
         }
-        off += tlv.length;   // skip other TLVs
+        offset += tlv.length;
     }
-    return best;
-}
 
-// Temporal filtering:
-//  - need CONFIRM_FRAMES consecutive detections before alerting
-//  - need CLEAR_FRAMES empty frames before clearing
-//  - the direct/passing flag only flips after PATH_FLIP_FRAMES frames agree,
-//    so cars near the lane boundary don't flicker between the two
-void updateThreatState(const VehicleThreat& best) {
-    static uint8_t streak     = 0;
-    static uint8_t misses     = 0;
-    static bool    active     = false;
-    static bool    directState = false;
-    static uint8_t flipCount  = 0;
-
-    if (best.threatTier > 0) {
-        if (streak < 255) streak++;
-        misses = 0;
+    // --- OUTPUT TARGET DATA ---
+    if (primaryThreat.isValid) {
+        digitalWrite(LED_PIN, HIGH);
+        
+        Serial.printf("TARGET_ALERT | Dist: %5.2fm | Angle: %5.1f deg | Speed: %5.1fm/s (%5.1fkm/h)\n",
+                      primaryThreat.distance_m,
+                      primaryThreat.approach_angle_deg,
+                      primaryThreat.closing_speed_mps,
+                      primaryThreat.closing_speed_mps * 3.6f);
     } else {
-        if (misses < 255) misses++;
-        streak = 0;
-    }
-
-    if (best.threatTier > 0 && streak >= CONFIRM_FRAMES) {
-        // Path-flag hysteresis (a fresh alert adopts the first reading)
-        if (!active) {
-            directState = best.isDirectPath;
-            flipCount = 0;
-        } else if (best.isDirectPath != directState) {
-            if (++flipCount >= PATH_FLIP_FRAMES) {
-                directState = best.isDirectPath;
-                flipCount = 0;
-            }
-        } else {
-            flipCount = 0;
-        }
-
-        VehicleThreat out = best;
-        out.isDirectPath = directState;
-        active = true;
-
-        Serial.printf("THREAT TIER %d (%s) | %.1f m | %.1f km/h | %.1f deg | TTC %.1f s\n",
-                      out.threatTier, out.isDirectPath ? "DIRECT" : "PASSING",
-                      out.distance, out.approachSpeed, out.angle, out.ttc);
-        broadcastThreat(out);
-    } else if (active && misses >= CLEAR_FRAMES) {
-        active = false;
-        flipCount = 0;
-        VehicleThreat clear = {0.0f, 0.0f, 0.0f, 99.0f, 0, false};
-        Serial.println("Threat cleared");
-        broadcastThreat(clear);
+        digitalWrite(LED_PIN, LOW);
     }
 }
 
-// ---------------------------------------------------------------------------
-// BLE notify: 6-byte packed packet (fits the default 20-byte payload)
-// ---------------------------------------------------------------------------
-void broadcastThreat(const VehicleThreat& t) {
-    if (!deviceConnected || pCharacteristic == nullptr) return;
+void resetPacketParser() {
+    packetLength = 0;
+    expectedPacketLength = 0;
+    collectingPacket = false;
+}
 
-    ThreatPacket pkt;
-    pkt.tier     = (uint8_t)((t.threatTier & 0x7F) | (t.isDirectPath ? PACKET_DIRECT_FLAG : 0));
-    pkt.distCm   = (uint16_t)constrain(lroundf(t.distance * 100.0f), 0L, 65535L);
-    pkt.speedKmh = (uint8_t)constrain(lroundf(t.approachSpeed), 0L, 255L);
-    pkt.angleDeg = (int8_t)constrain(lroundf(t.angle), -127L, 127L);
-    pkt.ttcDs    = (uint8_t)constrain(lroundf(t.ttc * 10.0f), 0L, 255L);
+void receiveRadarByte(uint8_t value) {
+    if (!collectingPacket) {
+        memmove(syncBuffer, syncBuffer + 1, 7);
+        syncBuffer[7] = value;
 
-    pCharacteristic->setValue((uint8_t*)&pkt, sizeof(pkt));
-    pCharacteristic->notify();
+        if (memcmp(syncBuffer, MAGIC_WORD, 8) == 0) {
+            memcpy(packetBuffer, MAGIC_WORD, 8);
+            packetLength = 8;
+            expectedPacketLength = 0;
+            collectingPacket = true;
+        }
+        return;
+    }
+
+    if (packetLength >= MAX_PACKET_SIZE) {
+        resetPacketParser();
+        return;
+    }
+
+    packetBuffer[packetLength++] = value;
+
+    if (packetLength == HEADER_SIZE) {
+        uint32_t totalLength;
+        memcpy(&totalLength, packetBuffer + 12, sizeof(totalLength));
+
+        if (totalLength < HEADER_SIZE || totalLength > MAX_PACKET_SIZE) {
+            resetPacketParser();
+            return;
+        }
+        expectedPacketLength = totalLength;
+    }
+
+    if (expectedPacketLength > 0 && packetLength == expectedPacketLength) {
+        processRadarPacket(packetBuffer, packetLength);
+        resetPacketParser();
+    }
+}
+
+void setup() {
+    pinMode(LED_PIN, OUTPUT);
+    digitalWrite(LED_PIN, LOW);
+
+    Serial.setRxBufferSize(16384);
+    Serial.begin(921600);
+
+    delay(3000);
+    sendRadarConfiguration();
+}
+
+void loop() {
+    while (Serial.available() > 0) {
+        uint8_t value = (uint8_t)Serial.read();
+        receiveRadarByte(value);
+    }
 }
