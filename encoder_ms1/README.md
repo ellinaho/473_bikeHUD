@@ -30,7 +30,11 @@ sudo reboot
 
 ### Wiring
 Encoder CLK <> Pi GPIO23
+
 Encoder DT <> Pi GPIO24
+
 Encoder SW <> Pi GPIO25
+
 Encoder + <> Pi 3.3V
+
 Encoder GND <> Pi GND

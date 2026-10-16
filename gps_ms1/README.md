@@ -8,9 +8,13 @@ The GPS needs to be exposed to the sky to get valid readings.
 
 ### Wiring
 GPS SDA <> Pi SDA (Pin 3)
+
 GPS SCL <> Pi SCL (Pin 5)
+
 GPS Vin <> Pi 3.3V (Pin 1)
+
 GPS GND <> Pi GND (Pin 6)
+
 GPS has I2C address 0x10
 
 ### Installing Dependencies 
