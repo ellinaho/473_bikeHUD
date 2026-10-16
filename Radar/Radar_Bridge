@@ -1,0 +1,182 @@
+import serial
+import threading
+import time
+import sys
+
+RADAR_CLI_PORT = "COM7"   # Radar CLI, 115200 baud
+RADAR_DATA_PORT = "COM8"  # Radar binary output, 921600 baud
+ESP32_PORT = "COM14"      # ESP32 USB serial
+
+CLI_BAUD = 115200
+DATA_BAUD = 921600
+ESP_BAUD = 921600
+
+running = True
+
+# Commands that should be forwarded to the radar CLI.
+CLI_COMMANDS = (
+    "sensorStop",
+    "flushCfg",
+    "dfeDataOutputMode",
+    "channelCfg",
+    "adcCfg",
+    "adcbufCfg",
+    "profileCfg",
+    "chirpCfg",
+    "frameCfg",
+    "lowPower",
+    "guiMonitor",
+    "cfarCfg",
+    "multiObjBeamForming",
+    "clutterRemoval",
+    "calibDcRangeSig",
+    "extendedMaxVelocity",
+    "aoaFovCfg",
+    "cfarFovCfg",
+    "lvdsStreamCfg",
+    "compRangeBiasAndRxChanPhase",
+    "measureRangeBiasAndRxChanPhase",
+    "CQRxSatMonitor",
+    "CQSigImgMonitor",
+    "analogMonitor",
+    "calibData",
+    "sensorStart",
+)
+
+try:
+    ser_cli = serial.Serial(
+        RADAR_CLI_PORT, CLI_BAUD, timeout=0.02
+    )
+    ser_data = serial.Serial(
+        RADAR_DATA_PORT, DATA_BAUD, timeout=0.02
+    )
+    ser_esp = serial.Serial(
+        ESP32_PORT, ESP_BAUD, timeout=0.02,
+        write_timeout=1
+    )
+
+    # Increase buffers where supported.
+    for port in (ser_data, ser_esp):
+        try:
+            port.set_buffer_size(rx_size=65536, tx_size=65536)
+        except (AttributeError, OSError, serial.SerialException):
+            pass
+
+    print("=== Radar / ESP32 bridge connected ===")
+    print(f"CLI:  {RADAR_CLI_PORT} @ {CLI_BAUD}")
+    print(f"DATA: {RADAR_DATA_PORT} @ {DATA_BAUD}")
+    print(f"ESP:  {ESP32_PORT} @ {ESP_BAUD}")
+    print("Start/reset the ESP32 now if it has not sent its configuration.")
+    print("Press Ctrl+C to stop.\n")
+
+except (serial.SerialException, OSError) as e:
+    print("Could not open a serial port:", e)
+    sys.exit(1)
+
+
+def forward_esp_commands():
+    """Read ESP32 text output and forward recognized CLI commands."""
+    line_buffer = bytearray()
+
+    while running:
+        try:
+            chunk = ser_esp.read(ser_esp.in_waiting or 1)
+            if not chunk:
+                continue
+
+            line_buffer.extend(chunk)
+
+            while b"\n" in line_buffer:
+                raw_line, _, remainder = line_buffer.partition(b"\n")
+                line_buffer = bytearray(remainder)
+
+                line = raw_line.decode(
+                    "utf-8", errors="replace"
+                ).strip().rstrip("\r")
+
+                if not line:
+                    continue
+
+                command = line.split()[0]
+
+                if command in CLI_COMMANDS:
+                    print(f"\n[ESP32 -> RADAR CLI] {line}")
+                    ser_cli.write((line + "\r\n").encode("utf-8"))
+                    ser_cli.flush()
+                else:
+                    print(f"[ESP32] {line}")
+
+        except (serial.SerialException, OSError) as e:
+            if running:
+                print("[ESP32 serial error]", e)
+                time.sleep(0.1)
+
+
+def read_radar_cli():
+    """Print text responses from the radar CLI."""
+    while running:
+        try:
+            data = ser_cli.read(ser_cli.in_waiting or 1)
+
+            if data:
+                text = data.decode("utf-8", errors="replace")
+                print("[RADAR CLI]", repr(text))
+
+        except (serial.SerialException, OSError) as e:
+            if running:
+                print("[CLI serial error]", e)
+                time.sleep(0.1)
+
+
+def forward_radar_data():
+    """Forward raw binary radar packets to the ESP32."""
+    total_bytes = 0
+    last_report = time.monotonic()
+
+    while running:
+        try:
+            waiting = ser_data.in_waiting
+
+            if waiting:
+                raw = ser_data.read(min(waiting, 4096))
+                if raw:
+                    ser_esp.write(raw)
+                    total_bytes += len(raw)
+
+            now = time.monotonic()
+            if now - last_report >= 2.0:
+                print(f"[DATA] Forwarded {total_bytes} bytes total")
+                last_report = now
+
+        except (serial.SerialException, OSError) as e:
+            if running:
+                print("[DATA serial error]", e)
+                time.sleep(0.1)
+
+
+threads = [
+    threading.Thread(target=forward_esp_commands, daemon=True),
+    threading.Thread(target=read_radar_cli, daemon=True),
+    threading.Thread(target=forward_radar_data, daemon=True),
+]
+
+for thread in threads:
+    thread.start()
+
+try:
+    while True:
+        time.sleep(0.5)
+
+except KeyboardInterrupt:
+    print("\nStopping bridge...")
+
+finally:
+    running = False
+
+    for port in (ser_cli, ser_data, ser_esp):
+        try:
+            port.close()
+        except Exception:
+            pass
+
+    print("Bridge stopped.")
