@@ -25,5 +25,5 @@ In your venv, `pip install bleak`
 
 ## Running Phone -> Pi
 * set things up on LightBlue App
-* for the milestone, we have the pi as central and lightblue as peripheral for preliminary testing without an entire app. for the actual product, we want to make pi the peripheral and the companion app as central for more stable conenction. 
+* for the milestone, we have the pi as central and lightblue as peripheral for preliminary testing without an entire app. for the actual product, we want to make pi the peripheral and the companion app as central for more stable connection. 
 * proves stuff works thoooo
