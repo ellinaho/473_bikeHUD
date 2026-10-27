@@ -120,8 +120,9 @@ Packets are sent on change and at least once per second (see BLE Interface).
 
 ### Background + Permissions
 - Navigation + BLE run in a foreground service (persistent "Navigating" notification) so it works with the screen off.
-- Ask user to disable battery optimization for the app.
+- Ask user to disable battery optimization for the app. On Samsung (test phone is a Galaxy A14) also add it to Settings → Battery → Background usage limits → Never sleeping apps.
 - Permissions: `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT`, `ACCESS_FINE_LOCATION`, `POST_NOTIFICATIONS`. No background location needed since the service is started from the app.
+- Foreground service: declare `foregroundServiceType="location|connectedDevice"` and request `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_LOCATION`, `FOREGROUND_SERVICE_CONNECTED_DEVICE` (required on Android 14+, crashes without it).
 
 ### BLE
 - First connect: scan for the nav service UUID, then save that Pi's address and only reconnect to it.
