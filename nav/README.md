@@ -150,7 +150,7 @@ Packets are sent on every `NavInfo` update and at least once per second (see BLE
 - Google Play location declaration if the app is ever published (SDK 8.0.0 requirement), not needed for sideloading.
 
 ### Helmet Display
-- Imperial. Packet is always meters, the Pi converts (ft under 0.1 mi, then mi).
+- Imperial. Packet is always meters, the Pi converts with `format_imperial()` in `nav_packet.py` (ft under 0.1 mi, then mi with 1 decimal). The app uses the same rule.
 
 ## Setup on Pi
 
@@ -174,7 +174,7 @@ Prints `no nav` until a packet comes in.
 1. Run `nav_receiver.py` on the Pi.
 2. On a phone, open **nRF Connect** (free, iOS and Android) and scan. Connect to the Pi (it might show up as the Pi's hostname instead of `BikeHUD`).
 3. Find the nav service, tap the upload arrow on the nav characteristic, and write the example bytes above as hex.
-4. The Pi should print `NAV left in 150 m onto 'State St'`.
+4. The Pi should print `NAV left in 492 ft 'State St'`.
 
 ## Usage
 

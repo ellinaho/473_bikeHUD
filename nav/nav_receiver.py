@@ -13,7 +13,7 @@ from bless import (
     GATTCharacteristicProperties,
     GATTAttributePermissions,
 )
-from nav_packet import NAV_SERVICE_UUID, NAV_CHAR_UUID, NavData, TURN_NAMES, unpack_nav, check_stale
+from nav_packet import NAV_SERVICE_UUID, NAV_CHAR_UUID, NavData, TURN_NAMES, unpack_nav, check_stale, format_imperial
 
 DEVICE_NAME = "BikeHUD"
 
@@ -77,8 +77,8 @@ async def main():
         while True:
             n = rx.get_nav()
             status = "NAV  " if n.valid else "no nav"
-            print(f"{status} {TURN_NAMES.get(n.turn, n.turn):>12}  in {n.dist:5d} m  onto '{n.street}'  "
-                  f"remaining {n.remaining} m")
+            print(f"{status} {TURN_NAMES.get(n.turn, n.turn):>12}  in {format_imperial(n.dist):>8}  '{n.street}'  "
+                  f"remaining {format_imperial(n.remaining)}")
             await asyncio.sleep(1.0)
     finally:
         await rx.stop()

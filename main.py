@@ -157,10 +157,10 @@ def status_line(gps_thread, nav_rx, state) -> str:
             parts.append("radar --")
 
     if nav_rx:
-        from nav_packet import TURN_NAMES
+        from nav_packet import TURN_NAMES, format_imperial
         n = nav_rx.get_nav()
         if n.valid:
-            parts.append(f"nav {TURN_NAMES.get(n.turn, n.turn)} in {n.dist} m '{n.street}'")
+            parts.append(f"nav {TURN_NAMES.get(n.turn, n.turn)} in {format_imperial(n.dist)} '{n.street}'")
         else:
             parts.append("nav --")
 

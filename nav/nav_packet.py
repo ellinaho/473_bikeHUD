@@ -19,6 +19,11 @@ MAX_NAME_BYTES = 40     #app truncates street name to this many UTF-8 bytes
 
 STALE_TIMEOUT = 5.0     #no packet for this long -> nav data invalid
 
+#packet is always meters, HUD shows imperial
+METERS_PER_MILE = 1609.344
+FEET_PER_METER = 3.28084
+FEET_UNTIL_MILES = 0.1  #show feet under this many miles, then miles
+
 #turn types, add new ones at the end so old numbers keep their meaning
 TURN_NONE = 0           #no active route
 TURN_STRAIGHT = 1
@@ -91,6 +96,18 @@ def unpack_nav(data: bytes) -> NavData | None:
         return None
     street = bytes(data[HEADER_SIZE:HEADER_SIZE + name_len]).decode("utf-8", errors="replace")
     return NavData(turn, dist, remaining, street, valid=True)
+
+
+def format_imperial(meters: int) -> str:
+    """
+    - meters from the packet -> HUD text, same rule as the phone app
+    - under 0.1 mi shows feet, ex: 150 m -> "492 ft"
+    - otherwise miles with 1 decimal, ex: 1200 m -> "0.7 mi"
+    """
+    miles = meters / METERS_PER_MILE
+    if miles < FEET_UNTIL_MILES:
+        return f"{round(meters * FEET_PER_METER)} ft"
+    return f"{miles:.1f} mi"
 
 
 def check_stale(nav: NavData) -> NavData:
