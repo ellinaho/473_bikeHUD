@@ -77,6 +77,7 @@ Android app, code goes in `android/`.
 ### API Key
 - Put the key in `android/local.properties` as `MAPS_API_KEY=...` (gitignored), load it with the Secrets Gradle Plugin. Never commit it.
 - In Google Cloud, restrict the key to Routes API + our package name + SHA-1 of each debug keystore that builds the app.
+- Because of the Android app restriction, every Routes API request must include `X-Android-Package: com.bikehud.app` and `X-Android-Cert: <SHA-1, no colons>`. Read the SHA-1 from the app's signing cert at runtime (don't hardcode) so it works on everyone's build.
 
 ### Destination
 - User types an address, sent straight to Routes API as the destination (no Places API for now).
