@@ -4,6 +4,7 @@ import android.app.Activity
 import android.util.Log
 import com.bikehud.app.BikeHudApp
 import com.bikehud.app.ble.NavPacket
+import com.google.android.libraries.navigation.AudioGuidanceSettings
 import com.google.android.libraries.navigation.NavigationApi
 import com.google.android.libraries.navigation.Navigator
 import com.google.android.libraries.navigation.RoutingOptions
@@ -31,6 +32,7 @@ class NavSession(private val activity: Activity) {
     val message: StateFlow<String> = _message
 
     private var navigator: Navigator? = null
+    private var voiceOn = false
 
     // shows Google's terms dialog the first time, needs location permission already granted
     fun init() {
@@ -40,6 +42,7 @@ class NavSession(private val activity: Activity) {
                 navigator = nav
                 nav.registerServiceForNavUpdates(activity.packageName, NavUpdatesService::class.java.name, 0)
                 nav.addArrivalListener { onArrived() }
+                applyAudio(nav)
                 _phase.value = Phase.READY
             }
 
@@ -79,6 +82,23 @@ class NavSession(private val activity: Activity) {
                 _message.value = "Route failed: $status"
             }
         }
+    }
+
+    // SDK speaks directions by default, off unless the user turns it on (helmet shows the turns)
+    fun setVoice(on: Boolean) {
+        voiceOn = on
+        navigator?.let { applyAudio(it) }
+    }
+
+    private fun applyAudio(nav: Navigator) {
+        val mode = if (voiceOn) {
+            AudioGuidanceSettings.GuidanceMode.VOICE_ALERTS_AND_GUIDANCE
+        } else {
+            AudioGuidanceSettings.GuidanceMode.SILENT
+        }
+        nav.setAudioGuidanceSettings(
+            AudioGuidanceSettings.builder().setGuidanceMode(mode).setVibrationEnabled(false).build()
+        )
     }
 
     fun stop() {

@@ -101,6 +101,7 @@ private fun MainScreen(ble: HudBle, nav: NavSession, lifecycle: Lifecycle, modif
     var address by remember { mutableStateOf("") }
     var place by remember { mutableStateOf<Place?>(null) }
     var simulate by remember { mutableStateOf(false) }
+    var voice by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("") }
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -156,8 +157,12 @@ private fun MainScreen(ble: HudBle, nav: NavSession, lifecycle: Lifecycle, modif
                 enabled = phase == NavSession.Phase.NAVIGATING,
                 onClick = { nav.stop() },
             ) { Text("Stop") }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(checked = simulate, onCheckedChange = { simulate = it }, enabled = phase == NavSession.Phase.READY)
             Text("Simulate ride")
+            Checkbox(checked = voice, onCheckedChange = { voice = it; nav.setVoice(it) })
+            Text("Voice")
         }
 
         Text("Nav: $phase   Routes left today: ${nav.cap.remaining}/${com.bikehud.app.nav.DailyCap.MAX_DESTINATIONS_PER_DAY}")

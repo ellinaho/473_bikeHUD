@@ -7,6 +7,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.Message
 import android.os.Messenger
+import android.util.Log
 import com.bikehud.app.BikeHudApp
 import com.bikehud.app.ble.NavPacket
 import com.google.android.libraries.mapsplatform.turnbyturn.TurnByTurnManager
@@ -63,6 +64,11 @@ class NavUpdatesService : Service() {
         val cue = when (info.navState) {
             NavState.ENROUTE -> {
                 val step = info.currentStep
+                if (step != null) {
+                    // raw SDK fields, for checking what the road name fields really contain
+                    Log.d(TAG, "maneuver=${step.maneuver} simple='${step.simpleRoadName}' " +
+                        "full='${step.fullRoadName}' instruction='${step.fullInstructionText}'")
+                }
                 if (step == null) {
                     last
                 } else {
@@ -81,5 +87,9 @@ class NavUpdatesService : Service() {
             else -> last
         }
         HudFeed.publish(application as BikeHudApp, cue)
+    }
+
+    companion object {
+        private const val TAG = "NavUpdates"
     }
 }
