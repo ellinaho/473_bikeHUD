@@ -79,6 +79,14 @@ Android app, code goes in `android/`. Google Navigation SDK does the navigation 
 - In Google Cloud, restrict the key to Navigation SDK + Maps SDK for Android (+ Routes API as backup), and to our package name + SHA-1 of each debug keystore that builds the app.
 - The SDK sends the package/cert headers itself. Only if we call the Routes API directly does the request need `X-Android-Package: com.bikehud.app` and `X-Android-Cert: <SHA-1, no colons>` (read the SHA-1 at runtime, don't hardcode).
 
+### Cost Safety
+Navigation SDK bills per destination set (`setDestinations`), including when using the simulator. Routes API bills per request.
+- Only set a destination when the user taps Start. Never in a loop, retry loop, or on app launch.
+- No automatic retries on failure, show the error and let the user tap again.
+- App-side cap: max 30 destinations per day, counted in SharedPreferences. Start button is disabled past the cap.
+- Unit tests never call the real SDK or API, use fakes.
+- Hard cap in Google Cloud: per-day quotas on Navigation SDK and Routes API (APIs & Services → the API → Quotas). Budget alerts only email, they don't stop charges.
+
 ### Destination
 - User types an address, converted to lat/lon with Android's built-in `Geocoder` (no extra API), then passed to the SDK as a `Waypoint`.
 - Places Autocomplete can replace this later.
