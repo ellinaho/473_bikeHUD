@@ -48,6 +48,11 @@ Max packet size is 47 bytes. iOS negotiates a large enough MTU automatically. On
 | 8 | u-turn |
 | 9 | roundabout |
 | 10 | arrive |
+| 11 | fork left |
+| 12 | fork right |
+| 13 | merge |
+| 14 | ramp left |
+| 15 | ramp right |
 
 New types get added at the end so old numbers don't change.
 

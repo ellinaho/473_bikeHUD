@@ -31,6 +31,11 @@ TURN_SHARP_RIGHT = 7
 TURN_UTURN = 8
 TURN_ROUNDABOUT = 9
 TURN_ARRIVE = 10
+TURN_FORK_LEFT = 11
+TURN_FORK_RIGHT = 12
+TURN_MERGE = 13
+TURN_RAMP_LEFT = 14
+TURN_RAMP_RIGHT = 15
 
 TURN_NAMES = {
     TURN_NONE: "none",
@@ -44,6 +49,11 @@ TURN_NAMES = {
     TURN_UTURN: "u-turn",
     TURN_ROUNDABOUT: "roundabout",
     TURN_ARRIVE: "arrive",
+    TURN_FORK_LEFT: "fork left",
+    TURN_FORK_RIGHT: "fork right",
+    TURN_MERGE: "merge",
+    TURN_RAMP_LEFT: "ramp left",
+    TURN_RAMP_RIGHT: "ramp right",
 }
 
 
