@@ -32,6 +32,26 @@ object NavPacket {
     const val TURN_RAMP_LEFT = 14
     const val TURN_RAMP_RIGHT = 15
 
+    fun turnName(turn: Int): String = when (turn) {
+        TURN_NONE -> "none"
+        TURN_STRAIGHT -> "straight"
+        TURN_LEFT -> "left"
+        TURN_RIGHT -> "right"
+        TURN_SLIGHT_LEFT -> "slight left"
+        TURN_SLIGHT_RIGHT -> "slight right"
+        TURN_SHARP_LEFT -> "sharp left"
+        TURN_SHARP_RIGHT -> "sharp right"
+        TURN_UTURN -> "u-turn"
+        TURN_ROUNDABOUT -> "roundabout"
+        TURN_ARRIVE -> "arrive"
+        TURN_FORK_LEFT -> "fork left"
+        TURN_FORK_RIGHT -> "fork right"
+        TURN_MERGE -> "merge"
+        TURN_RAMP_LEFT -> "ramp left"
+        TURN_RAMP_RIGHT -> "ramp right"
+        else -> "turn $turn"
+    }
+
     /**
      * - builds a packet, distances clamped to 0..65535 m
      * - street name cut to maxNameBytes without splitting a UTF-8 character

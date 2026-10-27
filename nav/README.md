@@ -71,16 +71,16 @@ Android app, code goes in `android/`. Google Navigation SDK does the navigation 
 ### Stack
 - Kotlin + Jetpack Compose, Android Studio
 - minSdk 29 (Android 10)
-- Google Navigation SDK for Android, travel mode `CYCLING`
+- Google Navigation SDK for Android 8.0.0, travel mode `CYCLING` (needs Kotlin 2.3+, core library desugaring)
 - Package name `com.bikehud.app`
 
 ### API Key
-- Put the key in `android/local.properties` as `MAPS_API_KEY=...` (gitignored), load it into the manifest with the Secrets Gradle Plugin. Never commit it.
+- Put the key in `android/local.properties` as `MAPS_API_KEY=...` (gitignored), `app/build.gradle.kts` reads it into the manifest as a placeholder. Never commit it.
 - In Google Cloud, restrict the key to Navigation SDK + Maps SDK for Android (+ Routes API as backup), and to our package name + SHA-1 of each debug keystore that builds the app.
 - The SDK sends the package/cert headers itself. Only if we call the Routes API directly does the request need `X-Android-Package: com.bikehud.app` and `X-Android-Cert: <SHA-1, no colons>` (read the SHA-1 at runtime, don't hardcode).
 
 ### Cost Safety
-Navigation SDK bills per destination set (`setDestinations`), including when using the simulator. Routes API bills per request.
+Navigation SDK bills per destination set (`setDestination`, only called in `NavSession.start()`), including when using the simulator. Routes API bills per request.
 - Only set a destination when the user taps Start. Never in a loop, retry loop, or on app launch.
 - No automatic retries on failure, show the error and let the user tap again.
 - App-side cap: max 30 destinations per day, counted in SharedPreferences. Start button is disabled past the cap.
@@ -88,11 +88,12 @@ Navigation SDK bills per destination set (`setDestinations`), including when usi
 - Hard cap in Google Cloud: per-day quotas on Navigation SDK and Routes API (APIs & Services → the API → Quotas). Budget alerts only email, they don't stop charges.
 
 ### Destination
-- User types an address, converted to lat/lon with Android's built-in `Geocoder` (no extra API), then passed to the SDK as a `Waypoint`.
+- User types an address and taps Find. Android's built-in `Geocoder` turns it into lat/lon (free, not a Maps API) and shows the address it matched.
+- Start passes it to the SDK as a `Waypoint`. Only Start is billed, so a wrong match costs nothing.
 - Places Autocomplete can replace this later.
 
 ### Navigation Flow
-1. Show the SDK's terms and conditions dialog on first launch (required before navigation works).
+1. Ask for location, Bluetooth, and notification permissions on launch. Getting the navigator shows Google's terms dialog the first time.
 2. Get the `Navigator`, set travel mode to cycling, set the destination waypoint, start guidance.
 3. Register our service for the turn-by-turn data feed (`registerServiceForNavUpdates`). The SDK sends a `NavInfo` about once a second.
 4. Convert each `NavInfo` to a packet and send it over BLE.
@@ -107,11 +108,13 @@ Navigation SDK bills per destination set (`setDestinations`), including when usi
 | remaining | distance to final destination (m) |
 | street | current step's road name, cut to 40 bytes |
 
-Nav state: enroute sends the packet as normal. Rerouting sends the last turn with dist unchanged until the new route arrives. Stopped sends turn 0 (none).
+Nav state: enroute sends the packet as normal. Rerouting sends the last turn with dist unchanged until the new route arrives. Stopped sends turn 0 (none), except right after arriving it keeps sending arrive.
+
+Street uses the step's simple road name, falls back to the full road name.
 
 ### Maneuver to Turn Type
 
-The SDK's `Maneuver` list is longer than ours, so map by group. Check exact names against the SDK's `Maneuver` reference.
+The SDK's `Maneuver` list is longer than ours, so map by group (`nav/ManeuverMap.kt`).
 
 | SDK maneuver group | Turn type |
 |---|---|
@@ -123,16 +126,17 @@ The SDK's `Maneuver` list is longer than ours, so map by group. Check exact name
 | destination (any side) | 10 |
 | fork left / right | 11 / 12 |
 | any merge | 13 |
-| on/off ramp left / right | 14 / 15 |
-| straight, depart, name change, unknown, anything else | 1 |
+| on/off ramp left / right (incl. keep, slight, sharp) | 14 / 15 |
+| on/off ramp u-turn | 8 |
+| straight, depart, name change, ferry, unspecified ramp, unknown, anything else | 1 |
 
 Packets are sent on every `NavInfo` update and at least once per second (see BLE Interface).
 
 ### Background + Permissions
-- Navigation + BLE run in a foreground service (persistent "Navigating" notification) so it works with the screen off. The SDK has its own foreground service manager, check if BLE can run under it instead of a second service.
+- During guidance the SDK runs its own foreground service (location type) with a navigation notification, which keeps the app process alive with the screen off. BLE lives in the app process (`BikeHudApp`), so no second service is needed.
 - Ask user to disable battery optimization for the app. On Samsung (test phone is a Galaxy A14) also add it to Settings → Battery → Background usage limits → Never sleeping apps.
-- Permissions: `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT`, `ACCESS_FINE_LOCATION`, `POST_NOTIFICATIONS`. No background location needed since the service is started from the app.
-- Foreground service: declare `foregroundServiceType="location|connectedDevice"` and request `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_LOCATION`, `FOREGROUND_SERVICE_CONNECTED_DEVICE` (required on Android 14+, crashes without it).
+- Runtime permissions asked on launch: `ACCESS_FINE_LOCATION`, `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT`, `POST_NOTIFICATIONS`. The SDK adds its own manifest permissions (foreground service, background location).
+- If the screen-off test shows nav stopping, the SDK docs recommend also asking for "Allow all the time" location.
 
 ### BLE
 - First connect: scan for the nav service UUID, then save that Pi's address and only reconnect to it.
@@ -142,6 +146,8 @@ Packets are sent on every `NavInfo` update and at least once per second (see BLE
 
 ### Later
 - Places Autocomplete for destination search.
+- Attribution/licensing screen (required by the SDK terms).
+- Google Play location declaration if the app is ever published (SDK 8.0.0 requirement), not needed for sideloading.
 
 ### Helmet Display
 - Imperial. Packet is always meters, the Pi converts (ft under 0.1 mi, then mi).

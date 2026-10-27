@@ -1,5 +1,6 @@
 package com.bikehud.app.ble
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
@@ -13,11 +14,13 @@ import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelUuid
 import android.util.Log
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -25,11 +28,11 @@ import kotlinx.coroutines.flow.StateFlow
  * BLE link to the helmet Pi. Phone is the central, Pi is the peripheral (nav/nav_receiver.py).
  * - first connect scans for the nav service, then the Pi's address is saved and reused
  * - reconnects on its own if the helmet power cycles, until disconnect() is called
- * - callers must have BLUETOOTH_SCAN + BLUETOOTH_CONNECT (or location on Android 10/11) before connect()
+ * - needs BLUETOOTH_SCAN + BLUETOOTH_CONNECT (or location on Android 10/11), state is NO_PERMISSION otherwise
  */
 @SuppressLint("MissingPermission")
 class HudBle(context: Context) {
-    enum class State { DISCONNECTED, BLUETOOTH_OFF, SCANNING, NOT_FOUND, CONNECTING, CONNECTED }
+    enum class State { DISCONNECTED, NO_PERMISSION, BLUETOOTH_OFF, SCANNING, NOT_FOUND, CONNECTING, CONNECTED }
 
     private val appContext = context.applicationContext
     private val adapter = appContext.getSystemService(BluetoothManager::class.java)?.adapter
@@ -48,6 +51,10 @@ class HudBle(context: Context) {
     val savedAddress: String? get() = prefs.getString(KEY_ADDRESS, null)
 
     fun connect() {
+        if (!hasPermission()) {
+            _state.value = State.NO_PERMISSION
+            return
+        }
         if (adapter == null || !adapter.isEnabled) {
             _state.value = State.BLUETOOTH_OFF
             return
@@ -55,6 +62,17 @@ class HudBle(context: Context) {
         wantConnected = true
         val saved = savedAddress
         if (saved != null) connectTo(adapter.getRemoteDevice(saved), autoConnect = false) else startScan()
+    }
+
+    private fun hasPermission(): Boolean {
+        val needed = if (Build.VERSION.SDK_INT >= 31) {
+            listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+        } else {
+            listOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+        return needed.all {
+            ContextCompat.checkSelfPermission(appContext, it) == PackageManager.PERMISSION_GRANTED
+        }
     }
 
     fun disconnect() {
