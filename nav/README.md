@@ -66,61 +66,62 @@ Left turn in 150 m onto "State St", 1200 m remaining:
 
 ## Phone App Design
 
-Android app, code goes in `android/`.
+Android app, code goes in `android/`. Google Navigation SDK does the navigation (routing, step tracking, off-route detection, rerouting). The app only converts its turn-by-turn feed into our packet and sends it over BLE.
 
 ### Stack
 - Kotlin + Jetpack Compose, Android Studio
 - minSdk 29 (Android 10)
-- Routing: Google Routes API, `travelMode: BICYCLE`
-- Phone GPS: FusedLocationProvider, high accuracy, 1 update/sec
+- Google Navigation SDK for Android, travel mode `CYCLING`
+- Package name `com.bikehud.app`
 
 ### API Key
-- Put the key in `android/local.properties` as `MAPS_API_KEY=...` (gitignored), load it with the Secrets Gradle Plugin. Never commit it.
-- In Google Cloud, restrict the key to Routes API + our package name + SHA-1 of each debug keystore that builds the app.
-- Because of the Android app restriction, every Routes API request must include `X-Android-Package: com.bikehud.app` and `X-Android-Cert: <SHA-1, no colons>`. Read the SHA-1 from the app's signing cert at runtime (don't hardcode) so it works on everyone's build.
+- Put the key in `android/local.properties` as `MAPS_API_KEY=...` (gitignored), load it into the manifest with the Secrets Gradle Plugin. Never commit it.
+- In Google Cloud, restrict the key to Navigation SDK + Maps SDK for Android (+ Routes API as backup), and to our package name + SHA-1 of each debug keystore that builds the app.
+- The SDK sends the package/cert headers itself. Only if we call the Routes API directly does the request need `X-Android-Package: com.bikehud.app` and `X-Android-Cert: <SHA-1, no colons>` (read the SHA-1 at runtime, don't hardcode).
 
 ### Destination
-- User types an address, sent straight to Routes API as the destination (no Places API for now).
-- Origin is the phone's current location.
+- User types an address, converted to lat/lon with Android's built-in `Geocoder` (no extra API), then passed to the SDK as a `Waypoint`.
+- Places Autocomplete can replace this later.
 
-### Routes API Request
-Field mask (polyline is needed for off-route detection):
-```
-routes.distanceMeters,routes.polyline,routes.legs.steps.distanceMeters,routes.legs.steps.polyline,
-routes.legs.steps.startLocation,routes.legs.steps.endLocation,routes.legs.steps.navigationInstruction
-```
+### Navigation Flow
+1. Show the SDK's terms and conditions dialog on first launch (required before navigation works).
+2. Get the `Navigator`, set travel mode to cycling, set the destination waypoint, start guidance.
+3. Register our service for the turn-by-turn data feed (`registerServiceForNavUpdates`). The SDK sends a `NavInfo` about once a second.
+4. Convert each `NavInfo` to a packet and send it over BLE.
+5. Use the SDK's built-in simulator (simulate locations along the route) for indoor testing and demos.
+
+### NavInfo to Packet
+
+| Packet field | From `NavInfo` |
+|---|---|
+| turn | current step's maneuver (table below) |
+| dist | distance to the current step (m) |
+| remaining | distance to final destination (m) |
+| street | current step's road name, cut to 40 bytes |
+
+Nav state: enroute sends the packet as normal. Rerouting sends the last turn with dist unchanged until the new route arrives. Stopped sends turn 0 (none).
 
 ### Maneuver to Turn Type
 
-| Google `maneuver` | Turn type |
+The SDK's `Maneuver` list is longer than ours, so map by group. Check exact names against the SDK's `Maneuver` reference.
+
+| SDK maneuver group | Turn type |
 |---|---|
-| `TURN_LEFT` / `TURN_RIGHT` | 2 / 3 |
-| `TURN_SLIGHT_LEFT` / `TURN_SLIGHT_RIGHT` | 4 / 5 |
-| `TURN_SHARP_LEFT` / `TURN_SHARP_RIGHT` | 6 / 7 |
-| `UTURN_LEFT`, `UTURN_RIGHT` | 8 |
-| `ROUNDABOUT_LEFT`, `ROUNDABOUT_RIGHT` | 9 |
-| `FORK_LEFT` / `FORK_RIGHT` | 11 / 12 |
-| `MERGE` | 13 |
-| `RAMP_LEFT` / `RAMP_RIGHT` | 14 / 15 |
-| `STRAIGHT`, `NAME_CHANGE`, `DEPART`, missing, anything else | 1 |
-| (app decides) last step reached | 10 |
+| turn left / right | 2 / 3 |
+| turn slight left / right, keep left / right | 4 / 5 |
+| turn sharp left / right | 6 / 7 |
+| u-turn (either direction) | 8 |
+| any roundabout | 9 |
+| destination (any side) | 10 |
+| fork left / right | 11 / 12 |
+| any merge | 13 |
+| on/off ramp left / right | 14 / 15 |
+| straight, depart, name change, unknown, anything else | 1 |
 
-Street name isn't its own field, it's pulled from `navigationInstruction.instructions` (text after "onto" / "on", cut at the next comma or newline). Empty string if not found.
-
-### Route Following
-
-| Setting | Value |
-|---|---|
-| Advance to next step | within 15 m of current step's end |
-| Off route | > 30 m from route polyline for 3 fixes in a row |
-| Reroute cooldown | min 15 s between Routes API requests |
-| Arrived | within 20 m of destination, send turn 10 then stop nav |
-| Distance to turn | along the route to the end of the current step, in meters |
-
-Packets are sent on change and at least once per second (see BLE Interface).
+Packets are sent on every `NavInfo` update and at least once per second (see BLE Interface).
 
 ### Background + Permissions
-- Navigation + BLE run in a foreground service (persistent "Navigating" notification) so it works with the screen off.
+- Navigation + BLE run in a foreground service (persistent "Navigating" notification) so it works with the screen off. The SDK has its own foreground service manager, check if BLE can run under it instead of a second service.
 - Ask user to disable battery optimization for the app. On Samsung (test phone is a Galaxy A14) also add it to Settings → Battery → Background usage limits → Never sleeping apps.
 - Permissions: `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT`, `ACCESS_FINE_LOCATION`, `POST_NOTIFICATIONS`. No background location needed since the service is started from the app.
 - Foreground service: declare `foregroundServiceType="location|connectedDevice"` and request `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_LOCATION`, `FOREGROUND_SERVICE_CONNECTED_DEVICE` (required on Android 14+, crashes without it).
@@ -132,9 +133,7 @@ Packets are sent on change and at least once per second (see BLE Interface).
 - Write without response.
 
 ### Later
-- Simulation mode: fake location that moves along the route, for indoor testing and demos.
 - Places Autocomplete for destination search.
-- Map screen.
 
 ### Helmet Display
 - Imperial. Packet is always meters, the Pi converts (ft under 0.1 mi, then mi).
