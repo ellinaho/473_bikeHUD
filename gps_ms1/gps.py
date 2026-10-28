@@ -1,15 +1,16 @@
 """
 Python function declarations for GPS module, ran on Raspberry Pi
 
-If we want quicker updates, either increase CHUNK for quicker read. Also lower sleep() vals to prevent blocking.
+Larger reads drain buffered data faster. update_rate_ms controls the requested GPS update rate.
 """
 
 import math
 import time
-from smbus2 import SMBus, i2c_msg
+import serial
 
-I2C_BUS = 1             # using pins 3/5 on pi
-CHUNK = 32              # bytes per I2C read
+SERIAL_PORT = "/dev/serial0"  # UART port for GPS
+BAUD_RATE = 9600            # GPS baud rate
+CHUNK = 256              # bytes per UART read
 ACK_TIMEOUT = 2.0       # seconds to wait for GPS to acknowledge a command
 
 KNOTS_TO_KPH = 1.852    # RMC gives speed in knots
@@ -73,27 +74,26 @@ class GPSData:
         self.dist = dist        #total distance travelled (km)
         self.valid = valid      #will be true if GPS data from satellite is valid
         self.lat = lat          #latitude in decimal degrees (pos = N, neg = S)
-        self.lon = lon          #longitude in decimal degree (pos = W, neg = E)
+        self.lon = lon          #longitude in decimal degree (pos = E, neg = W)
         self.heading = heading  #direction of travel in deg, 0 = N, 90 = E
         self.sats = sats        #number of satellites used (GGA)
-        self.hdop = hdop        #lat/lon accuracy (GGA)
+        self.hdop = hdop        #HDOP: satellite geometry measure, not accuracy in metres (GGA)
 
 #insert hdop chart here later maybe
 
 
 
-class PA1010D_GPS:
-    def gps_init(self, i2c_address: int = 0x10, update_rate_ms: int = 1000):
+class PA1616D_GPS:
+    def gps_init(self, update_rate_ms: int = 1000):
         """
-        - initialize i2c bus
+        - initialize uart
         - configure gps chip to output only needed data (speed, direction, lat/lon, valid)
         - set data update rate, 1000 ms = 1 Hz, 200 ms = 5 Hz; default is 1000 ms, ceiling is 100ms = 10hz
         - returns true if GPS acknowledges both commands
         """
-        self.addr = i2c_address
-        self.bus = SMBus(I2C_BUS)
+        self.uart = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=0, write_timeout=1)
 
-        #leftover bytes buffer b/c read grabs 32 bytes
+        #leftover bytes buffer b/c read grabs 256 bytes
         self.buf = b""
 
         #newest verified sentences from get_nmea_data; initialized to none until first read
@@ -121,7 +121,7 @@ class PA1010D_GPS:
         - returns false if failed or no reply within timeout (ACK_TIMEOUT)
         """
         sentence = f"${cmd}*{nmea_checksum(cmd):02X}\r\n"
-        self.bus.i2c_rdwr(i2c_msg.write(self.addr, sentence.encode("ascii")))
+        self.uart.write(sentence.encode("ascii"))
 
         cmd_num = cmd[4:7] #grabbing cmd num: PMTK314 -> 314
 
@@ -129,6 +129,15 @@ class PA1010D_GPS:
         while time.monotonic() < deadline:
             #parsing each reply line and splitting for needed cmd txt
             for line in self.read_lines():
+                if not line.startswith("$") or "*" not in line:
+                    continue
+
+                body, given = line[1:].split("*", 1)
+                try:
+                    if len(given) != 2 or nmea_checksum(body) != int(given, 16):
+                        continue
+                except ValueError:
+                    continue
                 fields = line.split("*")[0].split(",")
                 if fields[0] == "$PMTK001" and len(fields) >= 3 and fields[1] == cmd_num:
                     return fields[2] == "3"
@@ -137,13 +146,12 @@ class PA1010D_GPS:
 
     def read_lines(self) -> list[str]:
         """
-        - I2C read
+        - UART read
         - returns complete lines received so far
         - partial line appends in self.buf until remainder arrives
-        - GPS uses '\n' when it has nothing to send so those are skipped
+        - UART returns empty bytes when nothing is available
         """
-        msg = i2c_msg.read(self.addr, CHUNK) #prepares request
-        self.bus.i2c_rdwr(msg) #does  request
+        msg = self.uart.read(min(self.uart.in_waiting, CHUNK)) #prepares and reads request
         self.buf += bytes(msg) #appending to buffer
         *lines, self.buf = self.buf.split(b"\n")
 
@@ -200,9 +208,12 @@ class PA1010D_GPS:
         d = self.data
 
         #no new RMC, just check if GPS went quiet
+        now = time.monotonic()
+        if now - self.last_rmc_time > STALE_TIMEOUT:
+            d.valid = False
+            self.last_point = None
+
         if not self.new_rmc:
-            if time.monotonic() - self.last_rmc_time > STALE_TIMEOUT:
-                d.valid = False
             return d
         self.new_rmc = False
         self.last_rmc_time = time.monotonic()
@@ -225,8 +236,9 @@ class PA1010D_GPS:
 
         f = self.rmc
         #checking if status is valid (A/V)
-        if f[2] != "A":
+        if len(f) < 9 or f[2] != "A":
             d.valid = False     
+            self.last_point = None  #resetting last point so distance doesn't carry over after a stop
             return d
         try:
             lat = nmea_to_degrees(f[3], f[4])
@@ -236,6 +248,7 @@ class PA1010D_GPS:
 
         except (ValueError, IndexError):
             d.valid = False
+            self.last_point = None
             return d
 
         #if below min speed treat as not moving due to gpa low speed jitters
@@ -261,15 +274,18 @@ class PA1010D_GPS:
 
 if __name__ == "__main__":
     #test: configure GPS then print GPSData on every position update
-    gps = PA1010D_GPS()
+    gps = PA1616D_GPS()
     print("gps_init:", "OK" if gps.gps_init() else "FAILED (no ack)")
     try:
         while True:
-            if gps.get_nmea_data():
-                d = gps.update_gps_obj()
+            new_rmc = gps.get_nmea_data()
+            d = gps.update_gps_obj()
+            if new_rmc:
                 status = "FIX   " if d.valid else "no fix"
                 print(f"{status} {d.speed:5.1f} km/h  pace {d.pace:5.2f}  dist {d.dist:.3f} km  "
                       f"{d.lat:.6f}, {d.lon:.6f}  heading {d.heading:5.1f}  sats {d.sats}  hdop {d.hdop}")
             time.sleep(0.05)
     except KeyboardInterrupt:
         pass
+    finally:
+        gps.uart.close()

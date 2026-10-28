@@ -1,37 +1,37 @@
 """
 tldr: use this test to check gps hardware connection
 
-Raw NMEA test for the PA1010D GPS over I2C, ran on Raspberry Pi
-prints every NMEA sentence the GPS sends, with checksum result, to confirm wiring + I2C reads work
+Raw NMEA test for the PA1616D GPS over UART, ran on Raspberry Pi
+prints every NMEA sentence the GPS sends, with checksum result, to confirm wiring + UART reads work
 
 setup:
-    sudo raspi-config  ->  Interface Options -> I2C -> Enable, reboot
-    i2cdetect -y 1     ->  should show 10
-    pip3 install smbus2
+    sudo raspi-config -> Interface Options -> Serial Port
+    serial login shell: No
+    serial hardware: Yes
+    reboot
+    python -m pip install pyserial
 
 usage:
     python3 nmea_raw_test.py            # print all sentences
-    python3 nmea_raw_test.py --bytes    # also dump raw bytes from each I2C read
+    python3 nmea_raw_test.py --bytes    # also dump raw bytes from each UART read
 """
 
 import argparse
 import time
-from smbus2 import SMBus, i2c_msg
+import serial
 
-I2C_BUS = 1         # Pi header pins 3 (SDA) / 5 (SCL)
-GPS_ADDR = 0x10     # PA1010D default address
-CHUNK = 32          # bytes per I2C read
+UART_PORT = "/dev/serial0"  # Pi UART port
+GPS_BAUD = 9600     # PA1616D default baud rate
+CHUNK = 256         # bytes per UART read
 IDLE_SLEEP = 0.05   # sleep when GPS has nothing to send
 
 
-def read_chunk(bus):
+def read_chunk(uart):
     """
-    - plain I2C read (no register byte), GPS returns its next bytes of NMEA output
-    - when GPS buffer is empty it pads with '\n' (0x0A)
+    - plain UART read, GPS returns its next bytes of NMEA output
+    - Returns empty bytes when nothing is available
     """
-    msg = i2c_msg.read(GPS_ADDR, CHUNK)
-    bus.i2c_rdwr(msg)
-    return bytes(msg)
+    return uart.read(min(uart.in_waiting, CHUNK))
 
 
 def checksum_ok(sentence):
@@ -67,26 +67,26 @@ def describe_rmc(sentence):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--bytes", action="store_true", help="dump raw bytes from each I2C read")
+    parser.add_argument("--bytes", action="store_true", help="dump raw bytes from each UART read")
     args = parser.parse_args()
 
     buf = b""
     good = bad = 0
-    with SMBus(I2C_BUS) as bus:
-        print(f"reading GPS at 0x{GPS_ADDR:02x} on i2c-{I2C_BUS}, ctrl+c to stop")
+    with serial.Serial(UART_PORT, GPS_BAUD, timeout=0) as uart:
+        print(f"reading GPS at {UART_PORT}, ctrl+c to stop")
         try:
             while True:
-                data = read_chunk(bus)
+                data = read_chunk(uart)
                 if args.bytes:
                     print("raw:", data)
 
-                # all padding means GPS has nothing new yet
-                if data.count(b"\n") == len(data):
+                # empty reads
+                if not data:
                     time.sleep(IDLE_SLEEP)
                     continue
 
                 buf += data
-                # padding '\n' just shows up as empty lines and gets skipped
+                # newline-separated messages
                 *lines, buf = buf.split(b"\n")
                 for line in lines:
                     s = line.strip(b"\r").decode("ascii", errors="replace")

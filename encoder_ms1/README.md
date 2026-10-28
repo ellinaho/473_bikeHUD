@@ -18,8 +18,8 @@ sudo nano /boot/firmware/config.txt
 add the following under [all] at the very bottom:
 
 ```bash
-dtoverlay=rotary-encoder,pin_a=23,pin_b=24,relative_axis=1
-dtoverlay=gpio-key,gpio=25,keycode=28,label="ENTER"
+dtoverlay=rotary-encoder,pin_a=17,pin_b=27,relative_axis=1
+dtoverlay=gpio-key,gpio=22,keycode=28,label="ENTER"
 ```
 
 then set permissions:
@@ -29,11 +29,11 @@ sudo reboot
 ```
 
 ### Wiring
-Encoder CLK <> Pi GPIO23
+Encoder CLK <> Pi GPIO17
 
-Encoder DT <> Pi GPIO24
+Encoder DT <> Pi GPIO27
 
-Encoder SW <> Pi GPIO25
+Encoder SW <> Pi GPIO22
 
 Encoder + <> Pi 3.3V
 
