@@ -9,8 +9,11 @@ CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8"
 radar_data = {"tier": 0, "dist": 0, "speed": 0, "angle": 0}
 
 def handle_radar_packet(sender, data):
-    tier, dist, speed, angle = struct.unpack('<iiii', data)
-
+    dist, angle, speed, is_valid = struct.unpack('<fff?', data[:13])
+        
+    # Recreate the integer tier based on the boolean flag
+    tier = 1 if is_valid else 0
+    
     radar_data["tier"] = tier
     radar_data["dist"] = dist
     radar_data["speed"] = speed

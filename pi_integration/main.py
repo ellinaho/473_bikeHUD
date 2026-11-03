@@ -4,7 +4,7 @@ import time
 import asyncio
 
 # --- Import existing peripheral classes ---
-from gps import PA1616D_GPS
+from gps import PA1010D_GPS
 from encoder import HUDEncoder, HUDMode, HUDAction
 from phone_receiver import PhoneReceiver
 from radar_receiver import run_radar
@@ -21,7 +21,7 @@ class HUDState:
 # --- Worker Threads ---
 def gps_worker(q):
     """Runs the GPS UART reads"""
-    gps = PA1616D_GPS()
+    gps = PA1010D_GPS()
     if not gps.gps_init():
         print("[GPS] Failed to initialize")
         return

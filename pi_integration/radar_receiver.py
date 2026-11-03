@@ -10,7 +10,13 @@ async def esp32_worker(event_queue):
     """Background task handling BLE connection and auto-reconnect."""
     
     def handle_radar_packet(sender, data):
-        tier, dist, speed, angle = struct.unpack('<iiii', data)
+        # <fff? decodes 3 little-endian floats and 1 boolean (13 bytes total).
+        # data[:13] prevents crashes if the C++ compiler added blank padding bytes to the end of the packet.
+        dist, angle, speed, is_valid = struct.unpack('<fff?', data[:13])
+        
+        # Recreate the integer tier based on the boolean flag
+        tier = 1 if is_valid else 0
+        
         # Push the parsed data directly to the main thread
         event_queue.put((1, time.monotonic(), ("radar", {"tier": tier, "dist": dist, "speed": speed, "angle": angle})))
 

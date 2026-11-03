@@ -17,6 +17,11 @@ Then `sudo reboot`
 
 In your venv, `pip install bleak`
 
+if it suddenly doesn't want to connect, run:
+```
+bluetoothctl remove 8C:94:DF:B8:5A:0A
+```
+
 ## Running ESP32 -> Pi
 1. upload `esp_ble.c` to ESP32, open serial monitor at 115200 baud
 2. copy printed MAC address
