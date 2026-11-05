@@ -1,3 +1,12 @@
+"""
+1. Initialize encoder with encoder_init()
+2. Read raw encoder events with read_raw_encoder()
+3. Translate raw events to encoder actions (click, scroll) with get_encoder_action()
+4. Update HUD mode based on encoder scroll with update_HUD_mode() (mode 1 -> mode 2, etc)
+5. Handle click actions with handle_clicks() (long press, short press)
+6. Clear unread events in buffer with clear_buff()
+
+"""
 import time
 from enum import IntEnum
 try:
@@ -5,9 +14,9 @@ try:
 except ImportError:
     raise ImportError("Install with: pip install evdev")
 
-# TODO: Depends on how many modes we actually have
+# TODO: Depends on how many modes we actually have, add mode description
 class HUDMode(IntEnum):
-    MODE0 = 0
+    MODE0 = 0 
     MODE1 = 1
     MODE2 = 2
     MAX_MODES = 3
@@ -20,15 +29,13 @@ class HUDAction(IntEnum):
     LONG_PRESS = 4
 
 class HUDEncoder:
-    def __init__(self):
+    def __init__(self): 
         self.devices = []       # button is one device, spinning is one device
         self.time_pressed = 0.0     # logs when the button was first pressed
         self.long_press_thresh = 0.5  # TODO: what counts as long press
 
     def encoder_init(self, target_names: list = ["rotary@", "button@"]):
-        """
-        Find and attach device 
-        """
+        "Find and attach device paths for the encoder and button"
         device_paths = evdev.list_devices()
         
         for path in device_paths:
@@ -42,7 +49,7 @@ class HUDEncoder:
             raise FileNotFoundError("cannot find encoder! check hardware or dtoverlay")
 
     def read_raw_encoder(self) -> list:
-        """read raw values of button and spinning without blocking"""
+        "Read raw values of button and spinning without blocking "
         all_events = []
         
         for dev in self.devices:
@@ -55,7 +62,7 @@ class HUDEncoder:
         return all_events
 
     def get_encoder_action(self) -> HUDAction:
-        """translate encoder event to encoder action"""
+        "Translate encoder event to encoder action"
         events = self.read_raw_encoder()
         action = HUDAction.NONE
         
@@ -81,7 +88,7 @@ class HUDEncoder:
         return action
 
     def update_HUD_mode(self, curr_mode: HUDMode, action: HUDAction) -> HUDMode:
-        """translate encoder events to mode switching on HUD"""
+        "Translate encoder events to mode switching on HUD"
         if action == HUDAction.SCROLL_CW:
             new_mode = (int(curr_mode) + 1) % HUDMode.MAX_MODES
             return HUDMode(new_mode)
@@ -93,7 +100,7 @@ class HUDEncoder:
         return curr_mode
 
     def handle_clicks(self, action: HUDAction) -> str:
-        """translate click actions into commands"""
+        "translate click actions into commands"
         if action == HUDAction.LONG_PRESS:
             return "toggle_display"
         elif action == HUDAction.SHORT_PRESS:
@@ -102,10 +109,10 @@ class HUDEncoder:
         return "NONE"
 
     def clear_buff(self):
-        """throw away unread events in buffer"""
+        "throw away unread events in buffer"
         self.read_raw_encoder()
 
-# --- Main ---
+# For testing
 if __name__ == "__main__":
     encoder = HUDEncoder()
     encoder.encoder_init() 
