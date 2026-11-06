@@ -13,6 +13,8 @@ import os
 import re
 import sys
 import pygame
+import random
+from datetime import datetime
 
 # color definitions
 BLACK = (0, 0, 0)
@@ -24,12 +26,16 @@ RED = (232, 44, 30)
 ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 
 # Hard-coded mock values until real data is wired in
-MOCK = {
-    "speed": 24,
+DISPLAY_DATA = {
+    "speed": 15,
     "units": "mph",
-    "turn_dist": "400 ft",
+    "turn_dist": 0,
+    "turn_direction": "left",
     "time": "4:00 PM",
+    "radar_alert_angle": 0
 }
+
+ticks = 0
 
 def load_svg(name: str, height: int) -> pygame.Surface:
     """Load an SVG from the assets folder, rasterized at the given height (aspect preserved).
@@ -96,7 +102,8 @@ class SixVisionDisplay:
         self.font_units = pygame.font.Font(display_bold, int(H * 0.14))
         self.font_small = pygame.font.Font(text_bold, int(H * 0.09))
         self.logo = load_svg("smallLogo.svg", int(H * 0.17))
-        self.turn_icon = load_svg("turnLeft.svg", int(H * 0.19))
+        self.turn_icon_left = load_svg("turnLeft.svg", int(H * 0.19))
+        self.turn_icon_right = load_svg("turnRight.svg", int(H * 0.19))
 
         print(f"Started SixOS with dimensions {self.width}x{self.height}")
         return True
@@ -115,25 +122,27 @@ class SixVisionDisplay:
         draw_arc(s, GREY, center, H * 0.71, 180, 360, H * 0.025)
 
         # red car indicators, just outside the ring
-        draw_arc(s, RED, center, H * 0.785, 214, 246, H * 0.028)
-        draw_arc(s, RED, center, H * 0.785, 314, 345, H * 0.028)
+        draw_arc(s, RED, center, H * 0.785, DISPLAY_DATA["radar_alert_angle"] + 10, DISPLAY_DATA["radar_alert_angle"] - 10, H * 0.028)
 
         # speed + units
-        speed = self.font_speed.render(str(MOCK["speed"]), True, WHITE)
+        speed = self.font_speed.render(str(DISPLAY_DATA["speed"]), True, WHITE)
         s.blit(speed, speed.get_rect(center=(W / 2, H * 0.235)))
-        units = self.font_units.render(MOCK["units"], True, WHITE)
+        units = self.font_units.render(DISPLAY_DATA["units"], True, WHITE)
         s.blit(units, units.get_rect(center=(W / 2, H * 0.46)))
 
         # next turn, bottom-left
-        s.blit(self.turn_icon, self.turn_icon.get_rect(topleft=(W * 0.05, H * 0.64)))
-        dist = self.font_small.render(MOCK["turn_dist"], True, WHITE)
+        if DISPLAY_DATA["turn_direction"] == "left":
+            s.blit(self.turn_icon_left, self.turn_icon_left.get_rect(topleft=(W * 0.05, H * 0.64)))
+        else:
+            s.blit(self.turn_icon_right, self.turn_icon_right.get_rect(topleft=(W * 0.05, H * 0.64)))
+        dist = self.font_small.render(str(DISPLAY_DATA["turn_dist"]) + " ft", True, WHITE)
         s.blit(dist, dist.get_rect(midleft=(W * 0.05, H * 0.875)))
 
         # logo, bottom-centre
         s.blit(self.logo, self.logo.get_rect(center=(W / 2, H * 0.84)))
 
         # clock, bottom-right
-        clock = self.font_small.render(MOCK["time"], True, WHITE)
+        clock = self.font_small.render(DISPLAY_DATA["time"], True, WHITE)
         s.blit(clock, clock.get_rect(midright=(W * 0.95, H * 0.875)))
 
         pygame.display.flip()
@@ -152,6 +161,48 @@ class SixVisionDisplay:
         """Release the display on shutdown."""
         pygame.quit()
 
+# ELLINA <------------------------------------------------------
+# this function is for YOU
+# everything inside here is mock data. So feel free to delete
+# it all and update the DISPLAY_DATA however you want (integrate)
+# it with the data sources. Note, this runs ~30 times per second
+# ---
+# i would recomend keeping the ticks tho since it helps with scheduling
+# periodic functions/polling/sensor reading
+# ---
+# I would also reccomend keeping the time update
+def update_display_data():
+    """Function that runs every 1/30 seconds and updates the display data"""
+
+    # 30 ticks = ~1s
+    global ticks
+
+    # generate fake mock data speed (REPLACE THIS)
+    if (ticks % 5) == 0:
+        DISPLAY_DATA["speed"] += int((random.random() * 4) - 2)
+        if DISPLAY_DATA["speed"] < 1:
+            DISPLAY_DATA["speed"] = 1
+
+    # generate fake mock directions (REPLACE THIS)
+    if (ticks % 25) == 0:
+        if (DISPLAY_DATA["turn_dist"] == 0):
+            DISPLAY_DATA["turn_dist"] = 500
+            DISPLAY_DATA["turn_direction"] = "left" if DISPLAY_DATA["turn_direction"] == "right" else "right"
+        
+        DISPLAY_DATA["turn_dist"] -= 50
+
+    # generate fake alerts (REPLACE THIS)
+    DISPLAY_DATA["radar_alert_angle"] -= 2 % 180
+
+    # generate time (keep this lowkey)
+    now = datetime.now()
+    DISPLAY_DATA["time"] = now.strftime("%H:%M %p")
+
+    # avoid overflow or something
+    if ticks == 100000:
+        ticks = 0
+
+    ticks += 1
 
 # --- Main ---
 if __name__ == "__main__":
@@ -168,6 +219,7 @@ if __name__ == "__main__":
         # only keep the display on while window open
         # (lets the x button close it)
         while not display.should_quit():
+            update_display_data()
             display.render()
     except KeyboardInterrupt:
         pass
