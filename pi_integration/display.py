@@ -1,16 +1,65 @@
 """
-HUD display for the Raspberry Pi, drawn with pygame to the HDMI output.
+SixOS - the operating system powering the SixVision helmet
+User Interface Design by Ishan Kumar
 
 Run standalone to test:
     python3 display.py            # fullscreen at the panel's native resolution (what the Pi does)
-    python3 display.py --window   # 800x480 window for dev on a laptop
+    python3 display.py --window   # 640x360 window for dev on a laptop
 """
 
+import io
+import math
+import os
+import re
 import sys
 import pygame
 
+# color definitions
 BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
+GREY = (90, 90, 90)
+RED = (232, 44, 30)
+
+# assets path
+ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+
+# Hard-coded mock values until real data is wired in
+MOCK = {
+    "speed": 24,
+    "units": "mph",
+    "turn_dist": "400 ft",
+    "time": "4:00 PM",
+}
+
+def load_svg(name: str, height: int) -> pygame.Surface:
+    """Load an SVG from the assets folder, rasterized at the given height (aspect preserved).
+
+    This function is important because earlier I was running into issues where SVGs would
+    look very blurry when scaled up. This fucntion fixes that.
+    """
+    path = os.path.join(ASSETS, name)
+    svg = open(path, encoding="utf-8").read()
+    vb = re.search(r'viewBox="([\d.\s-]+)"', svg)
+    _, _, vw, vh = map(float, vb.group(1).split())
+    width = max(1, round(vw * height / vh))
+    svg = re.sub(r'\s(width|height)="[^"]*"', "", svg, count=2)  # drop any declared size
+    svg = svg.replace("<svg", f'<svg width="{width}" height="{height}"', 1)
+    img = pygame.image.load(io.BytesIO(svg.encode("utf-8")), name).convert_alpha()
+    # force white: pygame's SVG rasterizer ignores CSS <style> fills, leaving them black
+    img.fill(WHITE + (0,), special_flags=pygame.BLEND_RGBA_ADD)
+    return img
+
+
+def draw_arc(surface, color, center, radius, start_deg, end_deg, width):
+    """Helper function to draw arc bands. Angles in degrees, 0 = right, 90 = up, counterclockwise."""
+    cx, cy = center
+    steps = max(2, int(abs(end_deg - start_deg)))
+    outer, inner = [], []
+    for i in range(steps + 1):
+        a = math.radians(start_deg + (end_deg - start_deg) * i / steps)
+        outer.append((cx + radius * math.cos(a), cy - radius * math.sin(a)))
+        inner.append((cx + (radius - width) * math.cos(a), cy - (radius - width) * math.sin(a)))
+    pygame.draw.polygon(surface, color, outer + inner[::-1])
 
 
 class SixVisionDisplay:
@@ -22,10 +71,9 @@ class SixVisionDisplay:
         self.fps = fps
         self.screen = None
         self.clock = None
-        self.font = None
 
     def display_init(self) -> bool:
-        """Open the window, hide the cursor, load the font once. Returns False if the panel can't be opened."""
+        """Open the window, hide the cursor, load fonts and assets once. Returns False if the panel can't be opened."""
         pygame.init()
         flags = pygame.FULLSCREEN if self.fullscreen else 0
         try:
@@ -39,16 +87,54 @@ class SixVisionDisplay:
         pygame.display.set_caption("SixOS")
         pygame.mouse.set_visible(False)
         self.clock = pygame.time.Clock()
-        self.font = pygame.font.Font(None, int(self.height * 0.25))
+
+        H = self.height
+        # using the SF Pro font (thank you apple ily)
+        display_bold = os.path.join(ASSETS, "SF-Pro-Display-Bold.otf")
+        text_bold = os.path.join(ASSETS, "SF-Pro-Text-Bold.otf")
+        self.font_speed = pygame.font.Font(display_bold, int(H * 0.36))
+        self.font_units = pygame.font.Font(display_bold, int(H * 0.14))
+        self.font_small = pygame.font.Font(text_bold, int(H * 0.09))
+        self.logo = load_svg("smallLogo.svg", int(H * 0.17))
+        self.turn_icon = load_svg("turnLeft.svg", int(H * 0.19))
+
         print(f"Started SixOS with dimensions {self.width}x{self.height}")
         return True
 
     def render(self):
         """Draw one frame and push it to the screen."""
-        self.screen.fill(BLACK)
+        W, H = self.width, self.height
+        s = self.screen
 
-        text = self.font.render("hi", True, WHITE)
-        self.screen.blit(text, text.get_rect(center=self.screen.get_rect().center))
+        # set background. becomes transparent when projected on vision
+        s.fill(BLACK)
+
+        center = (W / 2, -H * 0.095)
+
+        # main ring: gray circle centred above the top edge so only the lower arc shows
+        draw_arc(s, GREY, center, H * 0.71, 180, 360, H * 0.025)
+
+        # red car indicators, just outside the ring
+        draw_arc(s, RED, center, H * 0.785, 214, 246, H * 0.028)
+        draw_arc(s, RED, center, H * 0.785, 314, 345, H * 0.028)
+
+        # speed + units
+        speed = self.font_speed.render(str(MOCK["speed"]), True, WHITE)
+        s.blit(speed, speed.get_rect(center=(W / 2, H * 0.235)))
+        units = self.font_units.render(MOCK["units"], True, WHITE)
+        s.blit(units, units.get_rect(center=(W / 2, H * 0.46)))
+
+        # next turn, bottom-left
+        s.blit(self.turn_icon, self.turn_icon.get_rect(topleft=(W * 0.05, H * 0.64)))
+        dist = self.font_small.render(MOCK["turn_dist"], True, WHITE)
+        s.blit(dist, dist.get_rect(midleft=(W * 0.05, H * 0.875)))
+
+        # logo, bottom-centre
+        s.blit(self.logo, self.logo.get_rect(center=(W / 2, H * 0.84)))
+
+        # clock, bottom-right
+        clock = self.font_small.render(MOCK["time"], True, WHITE)
+        s.blit(clock, clock.get_rect(midright=(W * 0.95, H * 0.875)))
 
         pygame.display.flip()
         self.clock.tick(self.fps)
@@ -71,7 +157,7 @@ class SixVisionDisplay:
 if __name__ == "__main__":
     # window mode for easy laptop dev away from pi
     if "--window" in sys.argv:
-        display = SixVisionDisplay(width=800, height=450, fullscreen=False)
+        display = SixVisionDisplay(width=640, height=360, fullscreen=False)
     else:
         display = SixVisionDisplay()
 
