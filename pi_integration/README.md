@@ -11,7 +11,7 @@ create your venv and install dependencies
 python3 -m venv .venv
 source .venv/bin/activate
 
-pip install evdev pyserial bleak bless
+pip install evdev pyserial bleak bless pygame
 ```
 
 ## Systemd services
