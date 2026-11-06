@@ -164,8 +164,8 @@ class SixVisionDisplay:
 # ELLINA <------------------------------------------------------
 # this function is for YOU
 # everything inside here is mock data. So feel free to delete
-# it all and update the DISPLAY_DATA however you want (integrate)
-# it with the data sources. Note, this runs ~30 times per second
+# it all and update the DISPLAY_DATA however you want, and integrate
+# with the data sources. Note, this runs ~30 times per second
 # ---
 # i would recomend keeping the ticks tho since it helps with scheduling
 # periodic functions/polling/sensor reading
