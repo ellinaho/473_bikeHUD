@@ -98,12 +98,15 @@ def encoder_worker(q):
 def main():
     event_queue = queue.PriorityQueue()
     state = HUDState()
-    
+
+    # Timer for the mock radar alert
+    state.clear_radar_time = 0.0
+
     # Initialize graphics engine
     display = HUDDisplay()
 
     # Start all hardware peripherals as background daemon threads
-    threading.Thread(target=gps_worker, args=(event_queue,), daemon=True).start()
+    #threading.Thread(target=gps_worker, args=(event_queue,), daemon=True).start()
     threading.Thread(target=encoder_worker, args=(event_queue,), daemon=True).start()
     threading.Thread(target=nav_worker, args=(event_queue,), daemon=True).start()
     threading.Thread(target=run_radar, args=(event_queue,), daemon=True).start()
@@ -126,12 +129,24 @@ def main():
                         state.nav = data
                     elif source == "encoder":
                         state.mode = data["mode"]
-                        if data["cmd"] == "toggle_display":
+                        cmd = data["cmd"]
+                        
+                        # --- Process the physical clicks ---
+                        if cmd == "toggle_display":
                             state.display_on = not state.display_on
+                        elif cmd == "click_only":
+                            print("[TEST] Fake radar alert injected!")
+                            state.radar = {"tier": 1, "dist": 12.4}
+                            state.clear_radar_time = time.monotonic() + 3.0
                             
                 except queue.Empty:
                     break
-            
+
+            # 2. Automatically clear the fake radar alert after 3 seconds
+            if state.clear_radar_time > 0 and time.monotonic() > state.clear_radar_time:
+                state.radar = {"tier": 0, "dist": 0.0}
+                state.clear_radar_time = 0.0
+
             # 2. Render the display
             display.render(state)
             
