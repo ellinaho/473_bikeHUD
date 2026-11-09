@@ -16,6 +16,8 @@ import pygame
 import random
 from datetime import datetime
 
+from phone_packet import TURN_NAMES, TURN_NONE, format_imperial
+
 # color definitions
 BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
@@ -29,10 +31,14 @@ ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 DISPLAY_DATA = {
     "speed": 15,
     "units": "mph",
+    "mode": 0,
+    "nav_valid": False,
     "turn_dist": 0,
-    "turn_direction": "left",
+    "turn_distance": "0 ft",
+    "turn_direction": None,
     "time": "4:00 PM",
-    "radar_alert_angle": 0
+    "radar_alert": False,
+    "radar_alert_angle": 0,
 }
 
 ticks = 0
@@ -77,6 +83,7 @@ class SixVisionDisplay:
         self.fps = fps
         self.screen = None
         self.clock = None
+        self.display_on = True
 
     def display_init(self) -> bool:
         """Open the window, hide the cursor, load fonts and assets once. Returns False if the panel can't be opened."""
@@ -108,8 +115,24 @@ class SixVisionDisplay:
         print(f"Started SixOS with dimensions {self.width}x{self.height}")
         return True
 
+    def handle_command(self, cmd: str):
+        """Handle a high-level UI command from the main loop."""
+        if cmd == "toggle_display":
+            self.display_on = not self.display_on
+            if not self.display_on:
+                self.screen.fill(BLACK)
+                pygame.display.flip()
+        return self.display_on
+
     def render(self):
         """Draw one frame and push it to the screen."""
+        if not self.display_on:
+            if self.screen is not None:
+                self.screen.fill(BLACK)
+                pygame.display.flip()
+                self.clock.tick(self.fps)
+            return
+
         W, H = self.width, self.height
         s = self.screen
 
@@ -122,21 +145,24 @@ class SixVisionDisplay:
         draw_arc(s, GREY, center, H * 0.71, 180, 360, H * 0.025)
 
         # red car indicators, just outside the ring
-        draw_arc(s, RED, center, H * 0.785, DISPLAY_DATA["radar_alert_angle"] + 10, DISPLAY_DATA["radar_alert_angle"] - 10, H * 0.028)
+        if DISPLAY_DATA["mode"] != 1 and DISPLAY_DATA["radar_alert"]:
+            draw_arc(s, RED, center, H * 0.785, DISPLAY_DATA["radar_alert_angle"] + 10, DISPLAY_DATA["radar_alert_angle"] - 10, H * 0.028)
 
         # speed + units
-        speed = self.font_speed.render(str(DISPLAY_DATA["speed"]), True, WHITE)
-        s.blit(speed, speed.get_rect(center=(W / 2, H * 0.235)))
-        units = self.font_units.render(DISPLAY_DATA["units"], True, WHITE)
-        s.blit(units, units.get_rect(center=(W / 2, H * 0.46)))
+        if DISPLAY_DATA["mode"] != 2:
+            speed = self.font_speed.render(str(DISPLAY_DATA["speed"]), True, WHITE)
+            s.blit(speed, speed.get_rect(center=(W / 2, H * 0.235)))
+            units = self.font_units.render(DISPLAY_DATA["units"], True, WHITE)
+            s.blit(units, units.get_rect(center=(W / 2, H * 0.46)))
 
         # next turn, bottom-left
-        if DISPLAY_DATA["turn_direction"] == "left":
-            s.blit(self.turn_icon_left, self.turn_icon_left.get_rect(topleft=(W * 0.05, H * 0.64)))
-        else:
-            s.blit(self.turn_icon_right, self.turn_icon_right.get_rect(topleft=(W * 0.05, H * 0.64)))
-        dist = self.font_small.render(str(DISPLAY_DATA["turn_dist"]) + " ft", True, WHITE)
-        s.blit(dist, dist.get_rect(midleft=(W * 0.05, H * 0.875)))
+        if DISPLAY_DATA["nav_valid"]:
+            if DISPLAY_DATA["turn_direction"] == "left":
+                s.blit(self.turn_icon_left, self.turn_icon_left.get_rect(topleft=(W * 0.05, H * 0.64)))
+            elif DISPLAY_DATA["turn_direction"] == "right":
+                s.blit(self.turn_icon_right, self.turn_icon_right.get_rect(topleft=(W * 0.05, H * 0.64)))
+            dist = self.font_small.render(DISPLAY_DATA["turn_distance"], True, WHITE)
+            s.blit(dist, dist.get_rect(midleft=(W * 0.05, H * 0.875)))
 
         # logo, bottom-centre
         s.blit(self.logo, self.logo.get_rect(center=(W / 2, H * 0.84)))
@@ -171,34 +197,74 @@ class SixVisionDisplay:
 # periodic functions/polling/sensor reading
 # ---
 # I would also reccomend keeping the time update
-def update_display_data():
-    """Function that runs every 1/30 seconds and updates the display data"""
+def update_display_data(state=None):
+    """Function that runs every 1/30 seconds and updates the display data.
 
-    # 30 ticks = ~1s
+    When a HUD state object is provided, it maps the live sensor data into the
+    display's data dictionary. Without a state, it keeps the mock demo values.
+    """
+
     global ticks
 
-    # generate fake mock data speed (REPLACE THIS)
+    if state is not None:
+        DISPLAY_DATA["mode"] = int(state.mode)
+
+        if state.gps and getattr(state.gps, "valid", False):
+            speed_kph = float(getattr(state.gps, "speed", 0.0))
+            DISPLAY_DATA["speed"] = max(0, int(speed_kph * 0.621371))
+            DISPLAY_DATA["units"] = "mph"
+        else:
+            DISPLAY_DATA["speed"] = 0
+            DISPLAY_DATA["units"] = "mph"
+
+        if state.nav and getattr(state.nav, "valid", False):
+            turn_code = getattr(state.nav, "turn", 0)
+            turn_name = TURN_NAMES.get(turn_code, "").lower()
+            if "left" in turn_name:
+                DISPLAY_DATA["turn_direction"] = "left"
+            elif "right" in turn_name:
+                DISPLAY_DATA["turn_direction"] = "right"
+            else:
+                DISPLAY_DATA["turn_direction"] = None
+            DISPLAY_DATA["nav_valid"] = turn_code != TURN_NONE
+            DISPLAY_DATA["turn_distance"] = format_imperial(int(getattr(state.nav, "dist", 0)))
+        else:
+            DISPLAY_DATA["nav_valid"] = False
+            DISPLAY_DATA["turn_dist"] = 0
+            DISPLAY_DATA["turn_distance"] = "0 ft"
+            DISPLAY_DATA["turn_direction"] = None
+
+        if state.radar and state.radar.get("tier", 0) > 0:
+            DISPLAY_DATA["radar_alert"] = True
+            DISPLAY_DATA["radar_alert_angle"] = float(state.radar.get("angle", 0.0))
+        else:
+            DISPLAY_DATA["radar_alert"] = False
+            DISPLAY_DATA["radar_alert_angle"] = 0
+
+        DISPLAY_DATA["time"] = datetime.now().strftime("%I:%M %p")
+        return
+
+    # 30 ticks = ~1s
     if (ticks % 5) == 0:
         DISPLAY_DATA["speed"] += int((random.random() * 4) - 2)
         if DISPLAY_DATA["speed"] < 1:
             DISPLAY_DATA["speed"] = 1
 
-    # generate fake mock directions (REPLACE THIS)
     if (ticks % 25) == 0:
         if (DISPLAY_DATA["turn_dist"] == 0):
             DISPLAY_DATA["turn_dist"] = 500
             DISPLAY_DATA["turn_direction"] = "left" if DISPLAY_DATA["turn_direction"] == "right" else "right"
-        
+
         DISPLAY_DATA["turn_dist"] -= 50
+        DISPLAY_DATA["nav_valid"] = True
+        DISPLAY_DATA["turn_distance"] = f'{DISPLAY_DATA["turn_dist"]} ft'
 
-    # generate fake alerts (REPLACE THIS)
     DISPLAY_DATA["radar_alert_angle"] -= 2 % 180
+    DISPLAY_DATA["radar_alert"] = True
 
-    # generate time (keep this lowkey)
     now = datetime.now()
     DISPLAY_DATA["time"] = now.strftime("%H:%M %p")
 
-    # avoid overflow or something
     if ticks == 100000:
         ticks = 0
 
