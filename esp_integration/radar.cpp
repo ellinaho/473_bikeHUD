@@ -46,7 +46,7 @@ static const size_t NUM_CONFIG_COMMANDS = sizeof(RADAR_CONFIG_COMMANDS) / sizeof
 #define MIN_REAR_DIST_M    0.00f
 #define MAX_REAR_DIST_M    10.0f
 #define MAX_LANE_OFFSET_M  6.0f
-#define MIN_APPROACH_VEL_MS -0.01f
+#define MIN_APPROACH_VEL_MS -0.5f
 
 static const uint8_t MAGIC_WORD[8] = {0x02, 0x01, 0x04, 0x03, 0x06, 0x05, 0x08, 0x07};
 
