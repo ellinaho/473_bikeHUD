@@ -3,14 +3,13 @@ import queue
 import time
 import asyncio
 import struct
-from copy import copy
 from bleak import BleakClient
 
 # --- Import custom peripherals ---
-from gps import PA1616D_GPS
+from gps import PA1010D_GPS
 from encoder import HUDEncoder, HUDMode, HUDAction
 from phone_receiver import PhoneReceiver
-from display import SixVisionDisplay, update_display_data
+from hud import HUDDisplay
 
 # --- Global State Struct ---
 class HUDState:
@@ -19,6 +18,7 @@ class HUDState:
         self.gps = None
         self.nav = None
         self.mode = HUDMode.MODE0
+        self.display_on = True
 
 # --- Worker Threads ---
 
@@ -60,20 +60,17 @@ def nav_worker(q):
     asyncio.run(run())
 
 def gps_worker(q):
-    """Runs the UART GPS reads."""
-    gps = PA1616D_GPS()
+    """Runs the I2C GPS reads."""
+    gps = PA1010D_GPS()
     if not gps.gps_init():
         print("[GPS] Failed to initialize")
         return
-
-    last_valid = None
+        
     while True:
-        new_reading = gps.get_nmea_data()
-        # update_gps_obj also detects stale fixes when no new sentence arrives
-        d = gps.update_gps_obj()
-        if new_reading or d.valid != last_valid:
-            q.put((3, time.monotonic(), ("gps", copy(d))))
-            last_valid = d.valid
+        if gps.get_nmea_data():
+            d = gps.update_gps_obj()
+            # Priority 3: Speed tracking
+            q.put((3, time.monotonic(), ("gps", d)))
         time.sleep(0.05)
 
 def encoder_worker(q):
@@ -105,13 +102,11 @@ def main():
     # Timer for the mock radar alert
     state.clear_radar_time = 0.0
 
-    # Initialize graphics engine using the new display implementation
-    display = SixVisionDisplay()
-    if not display.display_init():
-        raise RuntimeError("Failed to initialize SixVision display")
+    # Initialize graphics engine
+    display = HUDDisplay()
 
     # Start all hardware peripherals as background daemon threads
-    threading.Thread(target=gps_worker, args=(event_queue,), daemon=True).start()
+    #threading.Thread(target=gps_worker, args=(event_queue,), daemon=True).start()
     threading.Thread(target=encoder_worker, args=(event_queue,), daemon=True).start()
     threading.Thread(target=nav_worker, args=(event_queue,), daemon=True).start()
     threading.Thread(target=run_radar, args=(event_queue,), daemon=True).start()
@@ -120,9 +115,6 @@ def main():
 
     try:
         while True:
-            if display.should_quit():
-                break
-
             # 1. Drain the priority queue
             while not event_queue.empty():
                 try:
@@ -141,7 +133,7 @@ def main():
                         
                         # --- Process the physical clicks ---
                         if cmd == "toggle_display":
-                            display.handle_command(cmd)
+                            state.display_on = not state.display_on
                         elif cmd == "click_only":
                             print("[TEST] Fake radar alert injected!")
                             state.radar = {"tier": 1, "dist": 12.4}
@@ -155,16 +147,14 @@ def main():
                 state.radar = {"tier": 0, "dist": 0.0}
                 state.clear_radar_time = 0.0
 
-            # update the shared display data before rendering
-            update_display_data(state)
-
-            # render will now respect the display object's own on/off state
-            display.render()
+            # 2. Render the display
+            display.render(state)
+            
+            # 3. Lock framerate to ~30 FPS
+            time.sleep(0.033)
             
     except KeyboardInterrupt:
         print("\nShutting down HUD Engine.")
-    finally:
-        display.display_close()
 
 if __name__ == "__main__":
     main()
