@@ -137,6 +137,12 @@ static uint32_t statBytes = 0;
 static uint32_t statFrames = 0;
 static uint32_t statBadPackets = 0;
 static uint32_t lastStatMs = 0;
+static uint32_t lastConfigMs = 0;
+
+// If no valid frame has arrived this long after sending the config, send it again.
+// Covers the case where the bridge started late and missed the first commands
+// (e.g. dfeDataOutputMode) -> profileCfg/chirpCfg/frameCfg fail -> sensorStart Error -1.
+#define CONFIG_RETRY_MS 10000
 
 // ---------------------------------------------------------
 // CONFIGURATION SENDER
@@ -152,6 +158,7 @@ void sendRadarConfiguration() {
         delay(200);
     }
     Serial.println("CONFIG_SENT");
+    lastConfigMs = millis();
 #else
     Serial.println("[RADAR] Sending config to physical CLI port...");
     for (size_t i = 0; i < NUM_CONFIG_COMMANDS; i++) {
@@ -160,6 +167,7 @@ void sendRadarConfiguration() {
         while (Serial1.available()) Serial.write(Serial1.read());   // show Done/Error
     }
     Serial.println("[RADAR] Config sent.");
+    lastConfigMs = millis();
 #endif
 }
 
@@ -343,6 +351,13 @@ void readRadarTask(void *pvParameters) {
         }
 #endif
         printRadarStats();
+
+        // Radar never started (no frames) -> resend the full config
+        if (statFrames == 0 && millis() - lastConfigMs > CONFIG_RETRY_MS) {
+            Serial.println("[RADAR] No frames yet - resending config...");
+            sendRadarConfiguration();
+        }
+
         // 1 tick (was 5 ms): at 921600 baud ~460 bytes arrive every 5 ms
         vTaskDelay(1);
     }
