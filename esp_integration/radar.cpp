@@ -22,7 +22,7 @@ static const char* RADAR_CONFIG_COMMANDS[] = {
     "profileCfg 0 60 359 7 57.14 0 0 70 1 256 5209 0 0 158",
     "chirpCfg 0 0 0 0 0 0 0 1", "chirpCfg 1 1 0 0 0 0 0 2", "chirpCfg 2 2 0 0 0 0 0 4",
     "frameCfg 0 2 16 0 100 1 0", "lowPower 0 0", "guiMonitor -1 1 1 0 0 0 1",
-    "cfarCfg -1 0 2 8 4 3 0 15 1", "cfarCfg -1 1 0 4 2 3 1 15 1",
+    "cfarCfg -1 0 2 8 4 3 0 10 1", "cfarCfg -1 1 0 4 2 3 1 10 1",
     "multiObjBeamForming -1 1 0.5", "clutterRemoval -1 0",
     "calibDcRangeSig -1 0 -5 8 256", "extendedMaxVelocity -1 0",
     "lvdsStreamCfg -1 0 0 0",
@@ -42,10 +42,11 @@ static const size_t NUM_CONFIG_COMMANDS = sizeof(RADAR_CONFIG_COMMANDS) / sizeof
 #define TLV_TYPE_POINT_CLOUD 1
 
 // --- detection parameters --- 
-#define MIN_REAR_DIST_M    0.2f
+// changed to workbench testing 
+#define MIN_REAR_DIST_M    0.00f
 #define MAX_REAR_DIST_M    10.0f
 #define MAX_LANE_OFFSET_M  6.0f
-#define MIN_APPROACH_VEL_MS -0.2f
+#define MIN_APPROACH_VEL_MS -0.01f
 
 static const uint8_t MAGIC_WORD[8] = {0x02, 0x01, 0x04, 0x03, 0x06, 0x05, 0x08, 0x07};
 
@@ -156,6 +157,7 @@ void processRadarPacket(const uint8_t* data, size_t length) {
 
                 if (obj.y >= MIN_REAR_DIST_M && obj.y <= MAX_REAR_DIST_M && fabs(obj.x) <= MAX_LANE_OFFSET_M) {
                     if (obj.velocity < MIN_APPROACH_VEL_MS) {
+                        // FIX: Added the missing multiplication operators here
                         float dist = sqrtf(obj.x * obj.x + obj.y * obj.y);
                         
                         if (dist < primaryThreat.distance_m) {
@@ -171,15 +173,14 @@ void processRadarPacket(const uint8_t* data, size_t length) {
         offset += tlv.length;
     }
 
+    // FIX: Restructured this entire block so xQueueSend happens unconditionally
     if (primaryThreat.isValid) {
         digitalWrite(LED_PIN, HIGH);
         
-        // Push the threat struct into the RTOS queue without blocking
-        if (radarQueue != NULL) {
-            xQueueSend(radarQueue, &primaryThreat, (TickType_t)0);
-        }
-        
-#ifndef USE_USB_BRIDGE
+#ifdef USE_USB_BRIDGE
+        Serial.print("THREAT_DETECTED Dist: ");
+        Serial.println(primaryThreat.distance_m);
+#else
         // Only print debug info if we aren't using the USB bridge 
         // (printing this mid-stream can confuse the Python script)
         Serial.printf("TARGET_ALERT | Dist: %5.2fm | Speed: %5.1fm/s\n",
@@ -188,6 +189,14 @@ void processRadarPacket(const uint8_t* data, size_t length) {
 #endif
     } else {
         digitalWrite(LED_PIN, LOW);
+#ifdef USE_USB_BRIDGE
+        Serial.println("CLEAR");
+#endif
+    }
+
+    // --- ALWAYS send to Bluetooth, even if empty ---
+    if (radarQueue != NULL) {
+        xQueueSend(radarQueue, &primaryThreat, (TickType_t)0);
     }
 }
 

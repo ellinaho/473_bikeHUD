@@ -146,7 +146,9 @@ class SixVisionDisplay:
 
         # red car indicators, just outside the ring
         if DISPLAY_DATA["mode"] != 1 and DISPLAY_DATA["radar_alert"]:
-            draw_arc(s, RED, center, H * 0.785, DISPLAY_DATA["radar_alert_angle"] + 10, DISPLAY_DATA["radar_alert_angle"] - 10, H * 0.028)
+            display_angle = 270 - DISPLAY_DATA["radar_alert_angle"]
+            draw_arc(s, RED, center, H * 0.785,
+                     max(180, display_angle - 10), min(360, display_angle + 10), H * 0.028)
 
         # speed + units
         if DISPLAY_DATA["mode"] != 2:
@@ -259,7 +261,7 @@ def update_display_data(state=None):
         DISPLAY_DATA["nav_valid"] = True
         DISPLAY_DATA["turn_distance"] = f'{DISPLAY_DATA["turn_dist"]} ft'
 
-    DISPLAY_DATA["radar_alert_angle"] -= 2 % 180
+    DISPLAY_DATA["radar_alert_angle"] = ((DISPLAY_DATA["radar_alert_angle"] - 2 + 90) % 180) - 90
     DISPLAY_DATA["radar_alert"] = True
 
     now = datetime.now()
