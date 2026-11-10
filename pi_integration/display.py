@@ -32,7 +32,8 @@ DISPLAY_DATA = {
     "turn_dist": 0,
     "turn_direction": "left",
     "time": "4:00 PM",
-    "radar_alert_angle": 0  # Radar-relative degrees: 0 forward, signed toward either side
+    "radar_alert_angle": 0,  # Radar-relative degrees: 0 forward, signed toward either side
+    "radar_alert": True
 }
 
 ticks = 0
@@ -127,10 +128,11 @@ class SixVisionDisplay:
         draw_arc(s, GREY, center, H * 0.71, 180, 360, H * 0.025)
 
         # red car indicators, just outside the ring
-        arc_angle = radar_angle_to_arc_angle(DISPLAY_DATA["radar_alert_angle"])
-        indicator_start = min(360, arc_angle + 10)
-        indicator_end = max(180, arc_angle - 10)
-        draw_arc(s, RED, center, H * 0.785, indicator_start, indicator_end, H * 0.028)
+        if DISPLAY_DATA["radar_alert"]:
+            arc_angle = radar_angle_to_arc_angle(DISPLAY_DATA["radar_alert_angle"])
+            indicator_start = min(360, arc_angle + 10)
+            indicator_end = max(180, arc_angle - 10)
+            draw_arc(s, RED, center, H * 0.785, indicator_start, indicator_end, H * 0.028)
 
         # speed + units
         speed = self.font_speed.render(str(DISPLAY_DATA["speed"]), True, WHITE)
@@ -179,28 +181,31 @@ class SixVisionDisplay:
 # periodic functions/polling/sensor reading
 # ---
 # I would also reccomend keeping the time update
-def update_display_data():
+def update_display_data(state=None):
     """Function that runs every 1/30 seconds and updates the display data"""
 
     # 30 ticks = ~1s
     global ticks
 
-    # generate fake mock data speed (REPLACE THIS)
-    if (ticks % 5) == 0:
-        DISPLAY_DATA["speed"] += int((random.random() * 4) - 2)
-        if DISPLAY_DATA["speed"] < 1:
-            DISPLAY_DATA["speed"] = 1
+    if state is None:
+        # Generate mock values when running this file standalone.
+        if (ticks % 5) == 0:
+            DISPLAY_DATA["speed"] += int((random.random() * 4) - 2)
+            if DISPLAY_DATA["speed"] < 1:
+                DISPLAY_DATA["speed"] = 1
 
-    # generate fake mock directions (REPLACE THIS)
-    if (ticks % 25) == 0:
-        if (DISPLAY_DATA["turn_dist"] == 0):
-            DISPLAY_DATA["turn_dist"] = 500
-            DISPLAY_DATA["turn_direction"] = "left" if DISPLAY_DATA["turn_direction"] == "right" else "right"
-        
-        DISPLAY_DATA["turn_dist"] -= 50
+        if (ticks % 25) == 0:
+            if DISPLAY_DATA["turn_dist"] == 0:
+                DISPLAY_DATA["turn_dist"] = 500
+                DISPLAY_DATA["turn_direction"] = "left" if DISPLAY_DATA["turn_direction"] == "right" else "right"
+            DISPLAY_DATA["turn_dist"] -= 50
 
-    # Generate mock radar azimuths across the bike radar's configured +/-60 degree FOV.
-    DISPLAY_DATA["radar_alert_angle"] = ((ticks % 61) - 30) * 2
+        DISPLAY_DATA["radar_alert_angle"] = ((ticks % 61) - 30) * 2
+        DISPLAY_DATA["radar_alert"] = True
+    else:
+        radar = state.radar
+        DISPLAY_DATA["radar_alert"] = radar["tier"] > 0
+        DISPLAY_DATA["radar_alert_angle"] = radar["angle"]
 
     # generate time (keep this lowkey)
     now = datetime.now()
