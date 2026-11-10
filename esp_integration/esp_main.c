@@ -6,7 +6,7 @@
 QueueHandle_t radarQueue;
 
 void setup() {
-    Serial.begin(115200); 
+    Serial.begin(921600); 
     
     // Create a queue that can hold up to 10 VehicleThreat alerts
     radarQueue = xQueueCreate(10, sizeof(VehicleThreat));
