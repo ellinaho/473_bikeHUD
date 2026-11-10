@@ -144,7 +144,7 @@ def main():
                             display.handle_command(cmd)
                         elif cmd == "click_only":
                             print("[TEST] Fake radar alert injected!")
-                            state.radar = {"tier": 1, "dist": 12.4}
+                            state.radar = {"tier": 1, "dist": 12.4, "speed": 30.0, "angle": 240.0}
                             state.clear_radar_time = time.monotonic() + 3.0
                             
                 except queue.Empty:
@@ -152,7 +152,7 @@ def main():
 
             # 2. Automatically clear the fake radar alert after 3 seconds
             if state.clear_radar_time > 0 and time.monotonic() > state.clear_radar_time:
-                state.radar = {"tier": 0, "dist": 0.0}
+                state.radar = {"tier": 0, "dist": 0.0, "speed": 0.0, "angle": 0.0}
                 state.clear_radar_time = 0.0
 
             # update the shared display data before rendering
