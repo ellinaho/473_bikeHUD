@@ -22,9 +22,9 @@
 #define BENCH_MODE
 // ==============================================================================
 
-// RADAR_DEBUG prints every frame + points so you can see where it breaks.
-// The bridge script prints these as "[ESP32] ..." in its console.
-#define RADAR_DEBUG
+// Uncomment RADAR_DEBUG to ALSO print every frame + raw points (x, y, v) on top of
+// the normal CLEAR / THREAT_DETECTED lines. Useful when nothing is being detected.
+// #define RADAR_DEBUG
 
 // --- ESP32 Hardware Pins (Used only when PCB arrives) ---
 #define RADAR_CLI_RX  16
@@ -258,9 +258,7 @@ void processRadarPacket(const uint8_t* data, size_t length) {
                       primaryThreat.closing_speed_mps);
     } else {
         digitalWrite(LED_PIN, LOW);
-#ifndef RADAR_DEBUG
         Serial.println("CLEAR");
-#endif
     }
 
     // --- ALWAYS send to Bluetooth, even if empty ---
