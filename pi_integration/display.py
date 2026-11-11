@@ -210,6 +210,8 @@ def update_display_data(state=None):
         DISPLAY_DATA["speed"] += int((random.random() * 4) - 2)
         if DISPLAY_DATA["speed"] > 5:
             DISPLAY_DATA["speed"] = 5
+        if DISPLAY_DATA["speed"] < 0:
+            DISPLAY_DATA["speed"] = 0
 
     # generate fake mock directions (REPLACE THIS)
     if (ticks % 25) == 0:
