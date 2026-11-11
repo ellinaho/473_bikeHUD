@@ -29,7 +29,7 @@ ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 
 # Hard-coded mock values until real data is wired in
 DISPLAY_DATA = {
-    "speed": 15,
+    "speed": 2,
     "units": "mph",
     "mode": 0,
     "nav_valid": False,
@@ -208,8 +208,8 @@ def update_display_data(state=None):
     # generate fake mock data speed (REPLACE THIS)
     if (ticks % 5) == 0:
         DISPLAY_DATA["speed"] += int((random.random() * 4) - 2)
-        if DISPLAY_DATA["speed"] < 1:
-            DISPLAY_DATA["speed"] = 1
+        if DISPLAY_DATA["speed"] > 5:
+            DISPLAY_DATA["speed"] = 5
 
     # generate fake mock directions (REPLACE THIS)
     if (ticks % 25) == 0:
