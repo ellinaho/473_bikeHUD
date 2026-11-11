@@ -200,78 +200,38 @@ class SixVisionDisplay:
 # ---
 # I would also reccomend keeping the time update
 def update_display_data(state=None):
-    """Function that runs every 1/30 seconds and updates the display data.
-
-    When a HUD state object is provided, it maps the live sensor data into the
-    display's data dictionary. Without a state, it keeps the mock demo values.
-    """
-
-    global ticks
-
-    if state is not None:
-        DISPLAY_DATA["mode"] = int(state.mode)
-
-        if state.gps and getattr(state.gps, "valid", False):
-            speed_kph = float(getattr(state.gps, "speed", 0.0))
-            DISPLAY_DATA["speed"] = max(0, int(speed_kph * 0.621371))
-            DISPLAY_DATA["units"] = "mph"
-        else:
-            DISPLAY_DATA["speed"] = 0
-            DISPLAY_DATA["units"] = "mph"
-
-        if state.nav and getattr(state.nav, "valid", False):
-            turn_code = getattr(state.nav, "turn", 0)
-            turn_name = TURN_NAMES.get(turn_code, "").lower()
-            if "left" in turn_name:
-                DISPLAY_DATA["turn_direction"] = "left"
-            elif "right" in turn_name:
-                DISPLAY_DATA["turn_direction"] = "right"
-            else:
-                DISPLAY_DATA["turn_direction"] = None
-            DISPLAY_DATA["nav_valid"] = turn_code != TURN_NONE
-            DISPLAY_DATA["turn_distance"] = format_imperial(int(getattr(state.nav, "dist", 0)))
-        else:
-            DISPLAY_DATA["nav_valid"] = False
-            DISPLAY_DATA["turn_dist"] = 0
-            DISPLAY_DATA["turn_distance"] = "0 ft"
-            DISPLAY_DATA["turn_direction"] = None
-
-        if state.radar and state.radar.get("tier", 0) > 0:
-            DISPLAY_DATA["radar_alert"] = True
-            DISPLAY_DATA["radar_alert_angle"] = float(state.radar.get("angle", 0.0))
-        else:
-            DISPLAY_DATA["radar_alert"] = False
-            DISPLAY_DATA["radar_alert_angle"] = 0
-
-        DISPLAY_DATA["time"] = datetime.now().strftime("%I:%M %p")
-        return
+    """Function that runs every 1/30 seconds and updates the display data"""
 
     # 30 ticks = ~1s
+    global ticks
+
+    # generate fake mock data speed (REPLACE THIS)
     if (ticks % 5) == 0:
         DISPLAY_DATA["speed"] += int((random.random() * 4) - 2)
         if DISPLAY_DATA["speed"] < 1:
             DISPLAY_DATA["speed"] = 1
 
+    # generate fake mock directions (REPLACE THIS)
     if (ticks % 25) == 0:
         if (DISPLAY_DATA["turn_dist"] == 0):
             DISPLAY_DATA["turn_dist"] = 500
             DISPLAY_DATA["turn_direction"] = "left" if DISPLAY_DATA["turn_direction"] == "right" else "right"
-
+        
         DISPLAY_DATA["turn_dist"] -= 50
-        DISPLAY_DATA["nav_valid"] = True
-        DISPLAY_DATA["turn_distance"] = f'{DISPLAY_DATA["turn_dist"]} ft'
 
-    DISPLAY_DATA["radar_alert_angle"] = ((DISPLAY_DATA["radar_alert_angle"] - 2 + 90) % 180) - 90
-    DISPLAY_DATA["radar_alert"] = True
+    # generate fake alerts (REPLACE THIS)
+    DISPLAY_DATA["radar_alert_angle"] -= 2 % 180
 
+    # generate time (keep this lowkey)
     now = datetime.now()
     DISPLAY_DATA["time"] = now.strftime("%H:%M %p")
 
+    # avoid overflow or something
     if ticks == 100000:
         ticks = 0
 
     ticks += 1
-
+    
 # --- Main ---
 if __name__ == "__main__":
     # window mode for easy laptop dev away from pi
