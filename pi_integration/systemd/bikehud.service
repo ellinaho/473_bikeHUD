@@ -1,4 +1,5 @@
-# systemd *user* service that starts the BikeHUD (main.py) when the Pi boots to the desktop.
+# systemd *user* service that starts the BikeHUD (main.py) at boot on Raspberry Pi OS Lite (no desktop).
+# Needs `loginctl enable-linger $USER` so the user's services start at boot without anyone logging in.
 # Install: see "Run on boot (systemd)" in pi_integration/README.md
 # Assumes the repo is at ~/473_bikeHUD; edit ExecStart if it lives somewhere else.
 

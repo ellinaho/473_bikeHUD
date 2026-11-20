@@ -3,8 +3,8 @@ SixOS - the operating system powering the SixVision helmet
 User Interface Design by Ishan Kumar
 
 Run standalone to test:
-    python3 display.py            # fullscreen at the panel's native resolution (what the Pi does)
-    python3 display.py --window   # 640x360 window for dev on a laptop
+    SDL_VIDEODRIVER=kmsdrm python3 display.py   # fullscreen on the Pi (OS Lite, no desktop)
+    python3 display.py --window                 # 640x360 window for dev on a laptop
 """
 
 import io
