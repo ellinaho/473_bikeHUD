@@ -2,9 +2,9 @@
 #define BLE_H
 
 #include <Arduino.h>
-#include "radar.h" // Needed so this file knows about VehicleThreat and radarQueue
+#include "radar.h" 
 
 void setupBLE();
-void bleTask(void *pvParameters);
+void bleTask(void *pvParameters); // Task for BLE communication, runs on Core 0
 
 #endif

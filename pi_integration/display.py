@@ -14,6 +14,7 @@ import re
 import sys
 import pygame
 import random
+import time
 from datetime import datetime
 
 from phone_packet import TURN_NAMES, TURN_NONE, format_imperial
@@ -23,6 +24,8 @@ BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 GREY = (90, 90, 90)
 RED = (232, 44, 30)
+GREEN = (60, 200, 90)
+LIGHT_GREY = (170, 170, 170)
 
 # assets path
 ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
@@ -39,6 +42,8 @@ DISPLAY_DATA = {
     "time": "4:00 PM",
     "radar_alert": False,
     "radar_alert_angle": 0,
+    "debug": False,          # short click toggles the debug screen
+    "debug_cols": [[], []],  # [(text, color, is_header), ...] for left / right column
 }
 
 ticks = 0
@@ -108,6 +113,8 @@ class SixVisionDisplay:
         self.font_speed = pygame.font.Font(display_bold, int(H * 0.36))
         self.font_units = pygame.font.Font(display_bold, int(H * 0.14))
         self.font_small = pygame.font.Font(text_bold, int(H * 0.09))
+        self.font_debug_head = pygame.font.Font(display_bold, int(H * 0.06))
+        self.font_debug = pygame.font.Font(text_bold, int(H * 0.045))
         self.logo = load_svg("smallLogo.svg", int(H * 0.17))
         self.turn_icon_left = load_svg("turnLeft.svg", int(H * 0.19))
         self.turn_icon_right = load_svg("turnRight.svg", int(H * 0.19))
@@ -131,6 +138,10 @@ class SixVisionDisplay:
                 self.screen.fill(BLACK)
                 pygame.display.flip()
                 self.clock.tick(self.fps)
+            return
+
+        if DISPLAY_DATA["debug"]:
+            self.render_debug()
             return
 
         W, H = self.width, self.height
@@ -176,6 +187,29 @@ class SixVisionDisplay:
         pygame.display.flip()
         self.clock.tick(self.fps)
 
+    def render_debug(self):
+        """Debug screen: two columns of sensor / link status built by build_debug_cols()."""
+        W, H = self.width, self.height
+        s = self.screen
+        s.fill(BLACK)
+
+        title = self.font_debug_head.render("DEBUG  (click to exit)", True, WHITE)
+        s.blit(title, (W * 0.04, H * 0.03))
+        clock = self.font_debug.render(DISPLAY_DATA["time"], True, LIGHT_GREY)
+        s.blit(clock, clock.get_rect(topright=(W * 0.96, H * 0.04)))
+
+        for col, x in zip(DISPLAY_DATA["debug_cols"], (W * 0.04, W * 0.52)):
+            y = H * 0.15
+            for text, color, header in col:
+                if header:
+                    y += H * 0.02
+                font = self.font_debug_head if header else self.font_debug
+                s.blit(font.render(text, True, color), (x, y))
+                y += font.get_linesize()
+
+        pygame.display.flip()
+        self.clock.tick(self.fps)
+
     def should_quit(self) -> bool:
         """Drain the event queue. True if the window was closed or ESC was pressed."""
         for event in pygame.event.get():
@@ -199,6 +233,65 @@ class SixVisionDisplay:
 # periodic functions/polling/sensor reading
 # ---
 # I would also reccomend keeping the time update
+def _age(t):
+    """'1.2s ago' for a time.monotonic() timestamp, 'never' if 0."""
+    return f"{time.monotonic() - t:.1f}s ago" if t else "never"
+
+
+def build_debug_cols(state):
+    """Debug screen text. Left: GPS + BLE links. Right: radar packet + nav packet."""
+    H, T = True, False   # header / normal line
+
+    # --- GPS ---
+    g = state.gps
+    gps = [("GPS", WHITE, H)]
+    if g is None:
+        gps.append(("no data from GPS", RED, T))
+    else:
+        gps.append((f"fix: {'YES' if g.valid else 'NO'}   sats: {g.sats}   hdop: {g.hdop:.1f}",
+                    GREEN if g.valid else RED, T))
+        gps.append((f"lat {g.lat:.5f}   lon {g.lon:.5f}", WHITE, T))
+        gps.append((f"speed {g.speed:.1f} kph   hdg {g.heading:.0f}\u00b0", WHITE, T))
+        gps.append((f"dist {g.dist:.2f} km", WHITE, T))
+    gps.append((f"last update: {_age(state.gps_time)}", LIGHT_GREY, T))
+
+    # --- BLE links ---
+    b = state.ble or {}
+    ble = [("BLE", WHITE, H)]
+    if state.ble is None:
+        ble.append(("no status from watchdog yet", RED, T))
+    else:
+        ble.append((f"ESP32: {'connected' if b.get('esp') else 'DISCONNECTED'}",
+                    GREEN if b.get("esp") else RED, T))
+        ble.append((f"phone: {b.get('phone') or 'DISCONNECTED'}",
+                    GREEN if b.get("phone") else RED, T))
+
+    # --- Radar packet ---
+    r = state.radar or {}
+    threat = r.get("tier", 0) > 0
+    raw = r.get("raw", "").split()
+    radar = [("RADAR", WHITE, H),
+             (f"threat: {'YES' if threat else 'no'}", RED if threat else GREEN, T),
+             (f"dist {r.get('dist', 0.0):.2f} m   speed {r.get('speed', 0.0):.2f} m/s", WHITE, T),
+             (f"angle {r.get('angle', 0.0):.1f}\u00b0", WHITE, T)]
+    for i in range(0, len(raw), 8):
+        radar.append((("raw: " if i == 0 else "     ") + " ".join(raw[i:i + 8]), LIGHT_GREY, T))
+    radar.append((f"pkts {b.get('radar_count', 0)}   last: {_age(state.radar_time)}", LIGHT_GREY, T))
+
+    # --- Nav packet ---
+    n = state.nav
+    nav = [("NAV", WHITE, H)]
+    if n is None:
+        nav.append(("no data from phone", RED, T))
+    else:
+        nav.append((f"valid: {'YES' if n.valid else 'NO'}", GREEN if n.valid else RED, T))
+        nav.append((f"{TURN_NAMES.get(n.turn, n.turn)} in {format_imperial(n.dist)}", WHITE, T))
+        nav.append((f"'{n.street}'", WHITE, T))
+        nav.append((f"last update: {_age(n.last_update)}", LIGHT_GREY, T))
+
+    return [gps + ble, radar + nav]
+
+
 def update_display_data(state=None):
     """Function that runs every 1/30 seconds and updates the display data.
 
@@ -210,6 +303,9 @@ def update_display_data(state=None):
 
     if state is not None:
         DISPLAY_DATA["mode"] = int(state.mode)
+        DISPLAY_DATA["debug"] = getattr(state, "debug", False)
+        if DISPLAY_DATA["debug"]:
+            DISPLAY_DATA["debug_cols"] = build_debug_cols(state)
 
         if state.gps and getattr(state.gps, "valid", False):
             speed_kph = float(getattr(state.gps, "speed", 0.0))

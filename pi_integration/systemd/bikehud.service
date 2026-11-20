@@ -1,0 +1,16 @@
+# systemd *user* service that starts the BikeHUD (main.py) when the Pi boots to the desktop.
+# Install: see "Run on boot (systemd)" in pi_integration/README.md
+# Assumes the repo is at ~/473_bikeHUD; edit ExecStart if it lives somewhere else.
+
+[Unit]
+Description=BikeHUD (main.py)
+# keep retrying forever instead of giving up after a few quick crashes
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=%h/473_bikeHUD/pi_integration/run_hud.sh
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

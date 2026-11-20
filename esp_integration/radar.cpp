@@ -2,10 +2,7 @@
 #include <string.h>
 #include <math.h>
 
-// ==============================================================================
-// 473_bikeHUD HARDWARE TOGGLE
-// Leave this uncommented while testing with the Python script on the laptop.
-// COMMENT THIS OUT WHEN THE PCB ARRIVES AND THE RADAR IS WIRED TO THE ESP32!
+// comment out when pcb works
 #define USE_USB_BRIDGE 
 // ==============================================================================
 
@@ -16,40 +13,127 @@
 #define RADAR_DATA_TX 18  
 #define LED_PIN       2
 
+// RADAR CONFIGS: run on radar chip before data gets to esp32
 static const char* RADAR_CONFIG_COMMANDS[] = {
-    "sensorStop", "flushCfg", "dfeDataOutputMode 1", "channelCfg 15 7 0",
-    "adcCfg 2 1", "adcbufCfg -1 0 1 1 1",
+    "sensorStop",
+    "flushCfg",
+    "dfeDataOutputMode 1",      // Standard frame-based chirp mode
+    "channelCfg 15 7 0",        // Enable all 4 RX antennas (15) and 3 TX antennas (7)
+    "adcCfg 2 1",               // 16-bit ADC, complex 1x output
+    "adcbufCfg -1 0 1 1 1",
+
+    // [TUNE] RF CHIRP PROFILE (Controls max range, resolution, and RX gain)
+    // Format: profileCfg <id> <startFreqGHz> <idleTimeUs> <adcStartUs> <rampEndUs>
+    //                    <txOutPwr> <txPhase> <freqSlopeMHz/us> <txStartUs>
+    //                    <numAdcSamples> <digOutSampleRateKsps> <hpf1> <hpf2> <rxGainDb>
+    // - Last number (158): RX Gain. Usually leave as-is unless saturating at close range.
+    // - NOTE: If you need much longer range (e.g., 30-50m for cars), regenerate this
+    //   profile + chirpCfg using the TI mmWave Sensing Estimator tool.
     "profileCfg 0 60 359 7 57.14 0 0 70 1 256 5209 0 0 158",
-    "chirpCfg 0 0 0 0 0 0 0 1", "chirpCfg 1 1 0 0 0 0 0 2", "chirpCfg 2 2 0 0 0 0 0 4",
-    "frameCfg 0 2 16 0 100 1 0", "lowPower 0 0", "guiMonitor -1 1 1 0 0 0 1",
-    "cfarCfg -1 0 2 8 4 3 0 10 1", "cfarCfg -1 1 0 4 2 3 1 10 1",
-    "multiObjBeamForming -1 1 0.5", "clutterRemoval -1 0",
-    "calibDcRangeSig -1 0 -5 8 256", "extendedMaxVelocity -1 0",
+
+    "chirpCfg 0 0 0 0 0 0 0 1", // TX1
+    "chirpCfg 1 1 0 0 0 0 0 2", // TX2
+    "chirpCfg 2 2 0 0 0 0 0 4", // TX3
+
+    // [TUNE] FRAME RATE / UPDATE SPEED
+    // Format: frameCfg <startChirp> <endChirp> <numLoops> <numFrames> <framePeriodMs> <trigger> <delay>
+    // - 5th param (100): Frame periodicity in ms. 100ms = 10 Hz update rate.
+    //   Lower (e.g., 50 = 20 Hz) for faster reaction to speeding cars; higher to save power.
+    "frameCfg 0 2 16 0 100 1 0",
+
+    "lowPower 0 0",
+
+    // [TUNE] OUTPUT DATA BANDWIDTH
+    // Format: guiMonitor -1 <detectedObjects> <logMagRange> <noiseProfile> <rangeAzimuth> <rangeDoppler> <stats>
+    // - Currently sending Point Cloud (1), Range Profile (1), and Stats (1).
+    // - TIP: Change to "guiMonitor -1 1 0 0 0 0 0" in the field! You only parse the
+    //   Point Cloud TLV anyway, so turning off the others cuts UART traffic and prevents dropped packets.
+    "guiMonitor -1 1 1 0 0 0 1",
+
+    // [TUNE] SENSITIVITY - RANGE CFAR (Hardware noise floor threshold)
+    // Format: cfarCfg -1 0 <mode> <noiseWin> <guardLen> <divShift> <cyclic> <thresholdScale> <peakGrouping>
+    // - 2nd-to-last param (10): Detection threshold in dB.
+    //   LOWER (e.g., 6-8)  = More sensitive (sees cars farther away, but more false alarms/ghosts).
+    //   HIGHER (e.g., 14-18) = Less sensitive (cleaner signal, fewer ghosts, might miss distant bikes/cars).
+    "cfarCfg -1 0 2 8 4 3 0 10 1",
+
+    // [TUNE] SENSITIVITY - DOPPLER/VELOCITY CFAR
+    // - 2nd-to-last param (10): Same dB threshold rule as above, applied to velocity bins.
+    "cfarCfg -1 1 0 4 2 3 1 10 1",
+
+    "multiObjBeamForming -1 1 0.5",
+
+    // [TUNE] STATIC CLUTTER REMOVAL (CRITICAL FOR BIKE RADAR!)
+    // Format: clutterRemoval -1 <0=OFF, 1=ON>
+    // - Currently OFF (0) for workbench testing.
+    // - Change to "clutterRemoval -1 1" for field testing! This tells the radar to ignore
+    //   stationary objects (parked cars, trees, road signs, buildings) and only report moving targets.
+    "clutterRemoval -1 0",
+
+    "calibDcRangeSig -1 0 -5 8 256",
+
+    // [TUNE] EXTENDED MAX VELOCITY
+    // Format: extendedMaxVelocity -1 <0=OFF, 1=ON>
+    // - If fast cars wrap around and show up as negative/wrong speeds, try setting this to 1.
+    "extendedMaxVelocity -1 0",
+
     "lvdsStreamCfg -1 0 0 0",
     "compRangeBiasAndRxChanPhase 0.0 1 0 -1 0 1 0 -1 0 1 0 -1 0 1 0 -1 0 1 0 -1 0 1 0 -1 0",
     "measureRangeBiasAndRxChanPhase 0 1.5 0.2",
-    "CQRxSatMonitor 0 3 5 121 0", "CQSigImgMonitor 0 127 4",
-    "analogMonitor 0 0", "aoaFovCfg -1 -90 90 -90 90",
-    "cfarFovCfg -1 0 0 8.92", "cfarFovCfg -1 1 -1 1.00",
-    "calibData 0 0 0", "sensorStart"
+    "CQRxSatMonitor 0 3 5 121 0",
+    "CQSigImgMonitor 0 127 4",
+    "analogMonitor 0 0",
+
+    // [TUNE] HARDWARE FIELD OF VIEW (Angle of Arrival)
+    // Format: aoaFovCfg -1 <minAzimuthDeg> <maxAzimuthDeg> <minElevationDeg> <maxElevationDeg>
+    // - Currently -90 to +90 deg (full 180 deg behind you).
+    // - Narrow azimuth (e.g., -45 45) in the field to ignore sidewalks/oncoming lanes.
+    // - Narrow elevation (e.g., -15 15) to ignore overhead bridges and ground bounce.
+    "aoaFovCfg -1 -90 90 -90 90",
+
+    // [TUNE] HARDWARE RANGE FILTER (Direction 0 = Range in meters)
+    // Format: cfarFovCfg -1 0 <minDistM> <maxDistM>
+    // - WARNING: Currently capped at 8.92m! Even if you raise MAX_REAR_DIST_M below,
+    //   the radar will NOT output anything past 8.92m until you increase this number.
+    "cfarFovCfg -1 0 0 8.92",
+
+    // [TUNE] HARDWARE VELOCITY FILTER (Direction 1 = Velocity in m/s)
+    // Format: cfarFovCfg -1 1 <minVelM/s> <maxVelM/s>
+    // - WARNING: Currently capped at -1.0 to +1.0 m/s (~2.2 mph) for hand-waving tests!
+    // - For road testing, widen this (e.g., "cfarFovCfg -1 1 -30.0 30.0") or fast cars
+    //   will be completely invisible to the ESP32.
+    "cfarFovCfg -1 1 -1 1.00",
+
+    "calibData 0 0 0",
+    "sensorStart"
 };
 
 static const size_t NUM_CONFIG_COMMANDS = sizeof(RADAR_CONFIG_COMMANDS) / sizeof(RADAR_CONFIG_COMMANDS[0]);
 
+// --- TI mmWave Binary Packet Constants ---
 #define HEADER_SIZE 40
 #define TLV_HEADER_SIZE 8
 #define MAX_PACKET_SIZE 8192
 #define TLV_TYPE_POINT_CLOUD 1
 
-// --- detection parameters --- 
-// changed to workbench testing 
-#define MIN_REAR_DIST_M    0.00f
-#define MAX_REAR_DIST_M    10.0f
-#define MAX_LANE_OFFSET_M  6.0f
-#define MIN_APPROACH_VEL_MS -0.5f
+// ==============================================================================
+// [TUNE] SOFTWARE DETECTION & THREAT FILTERING (ESP32 Side)
+// These filter the points that survive the hardware config above.
+// Coordinate system (looking straight out the front of the radar):
+//   +Y = Straight behind the bike (distance)
+//   +X / -X = Left / Right lateral offset (lane width)
+//   Velocity = Negative (-) means approaching you; Positive (+) means moving away.
+// ==============================================================================
+#define MIN_REAR_DIST_M     0.00f  // [TUNE] Ignore reflections closer than this (e.g., 0.5m to ignore your own rear wheel/frame)
+#define MAX_REAR_DIST_M     10.0f  // [TUNE] Max alert distance in meters (bump to 30.0f - 50.0f for road testing; match cfarFovCfg!)
+#define MAX_LANE_OFFSET_M   6.0f   // [TUNE] Half-width of detection corridor (e.g., 2.5f - 3.5f covers your lane + adjacent lane)
+#define MIN_APPROACH_VEL_MS -0.5f  // [TUNE] Min closing speed to trigger alert (m/s). Must be NEGATIVE.
+                                   //        -0.5 m/s (~1 mph) is sensitive; try -1.5f or -2.0f (~4.5 mph) to ignore slow jitter.
 
+// TI mmWave frame sync pattern ("Magic Word")
 static const uint8_t MAGIC_WORD[8] = {0x02, 0x01, 0x04, 0x03, 0x06, 0x05, 0x08, 0x07};
 
+// Packed structs match the exact byte layout sent by the radar DSP
 struct __attribute__((packed)) MMWaveFrameHeader {
     uint8_t magicWord[8];
     uint32_t version;
@@ -68,12 +152,13 @@ struct __attribute__((packed)) TLVHeader {
 };
 
 struct __attribute__((packed)) DetectedObject {
-    float x;
-    float y;
-    float z;
-    float velocity;
+    float x;        // Lateral offset in meters (left/right)
+    float y;        // Longitudinal distance in meters (behind bike)
+    float z;        // Vertical height in meters (up/down) - not currently filtered
+    float velocity; // Radial velocity in m/s (negative = approaching)
 };
 
+// Packet parser state variables
 static uint8_t packetBuffer[MAX_PACKET_SIZE];
 static size_t packetLength = 0;
 static size_t expectedPacketLength = 0;
@@ -89,7 +174,7 @@ void sendRadarConfiguration() {
     Serial.println("ESP32_READY");
     for (size_t i = 0; i < NUM_CONFIG_COMMANDS; i++) {
         Serial.println(RADAR_CONFIG_COMMANDS[i]);
-        delay(200);
+        delay(200); // Gives radar CLI time to parse each line
     }
     Serial.println("CONFIG_SENT");
 #else
@@ -111,11 +196,12 @@ void setupRadarHardware() {
     digitalWrite(LED_PIN, LOW);
 
 #ifdef USE_USB_BRIDGE
-    // We only need the main USB serial when routing through the laptop
+    // Large 16KB RX buffer prevents dropping bytes during high-speed binary bursts
     Serial.setRxBufferSize(16384);
     delay(3000);
 #else
-    // Initialize the two physical UART ports for the PCB
+    // Initialize the two physical UART ports for the PCB:
+    // Serial1 = 115200 baud CLI (text config), Serial2 = 921600 baud Data (binary point cloud)
     Serial1.begin(115200, SERIAL_8N1, RADAR_CLI_RX, RADAR_CLI_TX);
     Serial2.setRxBufferSize(16384);
     Serial2.begin(921600, SERIAL_8N1, RADAR_DATA_RX, RADAR_DATA_TX);
@@ -134,11 +220,14 @@ void processRadarPacket(const uint8_t* data, size_t length) {
     MMWaveFrameHeader header;
     memcpy(&header, data, sizeof(header));
 
+    // Sanity check: drop corrupted packets
     if (header.totalPacketLen != length || header.numTLVs > 64) return;
 
     size_t offset = HEADER_SIZE;
+    // Default "no threat" struct (distance initialized to 999m so any real threat is closer)
     VehicleThreat primaryThreat = {999.0f, 0.0f, 0.0f, false};
 
+    // Walk through all TLV (Type-Length-Value) payloads in this frame
     for (uint32_t t = 0; t < header.numTLVs; t++) {
         if (offset + TLV_HEADER_SIZE > length) return;
 
@@ -148,6 +237,7 @@ void processRadarPacket(const uint8_t* data, size_t length) {
 
         if (tlv.length > length - offset) return;
 
+        // We only care about Type 1: Detected Points (x, y, z, velocity)
         if (tlv.type == TLV_TYPE_POINT_CLOUD) {
             uint32_t objectCount = tlv.length / sizeof(DetectedObject);
 
@@ -155,16 +245,23 @@ void processRadarPacket(const uint8_t* data, size_t length) {
                 DetectedObject obj;
                 memcpy(&obj, data + offset + i * sizeof(DetectedObject), sizeof(DetectedObject));
 
+                // 1. Spatial Filter: Is the point inside our rear detection box?
+                // (Optional [TUNE]: You can also filter obj.z here if ground/road reflections trigger alerts)
                 if (obj.y >= MIN_REAR_DIST_M && obj.y <= MAX_REAR_DIST_M && fabs(obj.x) <= MAX_LANE_OFFSET_M) {
+                    
+                    // 2. Velocity Filter: Is it moving TOWARD us fast enough?
                     if (obj.velocity < MIN_APPROACH_VEL_MS) {
-                        // FIX: Added the missing multiplication operators here
                         float dist = sqrtf(obj.x * obj.x + obj.y * obj.y);
                         
+                        // 3. Threat Selection: Keep only the CLOSEST approaching target
+                        // [TUNE] Note: In the field, a single noisy point can trigger this.
+                        // If you get flickering false alerts, consider requiring a target to appear
+                        // for 2-3 consecutive frames before setting isThreat = true.
                         if (dist < primaryThreat.distance_m) {
                             primaryThreat.distance_m = dist;
                             primaryThreat.approach_angle_deg = atan2f(obj.x, obj.y) * (180.0f / M_PI);
                             primaryThreat.closing_speed_mps = fabsf(obj.velocity);
-                            primaryThreat.isValid = true;
+                            primaryThreat.isThreat = true;
                         }
                     }
                 }
@@ -173,8 +270,8 @@ void processRadarPacket(const uint8_t* data, size_t length) {
         offset += tlv.length;
     }
 
-    // FIX: Restructured this entire block so xQueueSend happens unconditionally
-    if (primaryThreat.isValid) {
+    // Update onboard LED & debug serial output
+    if (primaryThreat.isThreat) {
         digitalWrite(LED_PIN, HIGH);
         
 #ifdef USE_USB_BRIDGE
@@ -194,7 +291,7 @@ void processRadarPacket(const uint8_t* data, size_t length) {
 #endif
     }
 
-    // --- ALWAYS send to Bluetooth, even if empty ---
+    // --- ALWAYS send to Bluetooth/HUD task, even if no threat (so HUD clears old alerts) ---
     if (radarQueue != NULL) {
         xQueueSend(radarQueue, &primaryThreat, (TickType_t)0);
     }
@@ -206,8 +303,10 @@ void resetPacketParser() {
     collectingPacket = false;
 }
 
+// Byte-by-byte state machine that hunts for MAGIC_WORD and assembles full frames
 void receiveRadarByte(uint8_t value) {
     if (!collectingPacket) {
+        // Shift 8-byte sliding window and check for Magic Word
         memmove(syncBuffer, syncBuffer + 1, 7);
         syncBuffer[7] = value;
 
@@ -220,6 +319,7 @@ void receiveRadarByte(uint8_t value) {
         return;
     }
 
+    // Guard against buffer overflow
     if (packetLength >= MAX_PACKET_SIZE) {
         resetPacketParser();
         return;
@@ -227,6 +327,7 @@ void receiveRadarByte(uint8_t value) {
 
     packetBuffer[packetLength++] = value;
 
+    // Once we have the 40-byte header, extract totalPacketLen (at byte offset 12)
     if (packetLength == HEADER_SIZE) {
         uint32_t totalLength;
         memcpy(&totalLength, packetBuffer + 12, sizeof(totalLength));
@@ -238,6 +339,7 @@ void receiveRadarByte(uint8_t value) {
         expectedPacketLength = totalLength;
     }
 
+    // Full packet received -> parse it and reset for the next frame
     if (expectedPacketLength > 0 && packetLength == expectedPacketLength) {
         processRadarPacket(packetBuffer, packetLength);
         resetPacketParser();
@@ -250,19 +352,19 @@ void receiveRadarByte(uint8_t value) {
 void readRadarTask(void *pvParameters) {
     for (;;) {
 #ifdef USE_USB_BRIDGE
-        // Read binary data funneled down the laptop USB cable
+        // Drain all available bytes from laptop USB bridge
         while (Serial.available() > 0) {
             uint8_t value = (uint8_t)Serial.read();
             receiveRadarByte(value);
         }
 #else
-        // Read binary data directly from the physical radar pin
+        // Drain all available bytes from physical radar UART2
         while (Serial2.available() > 0) {
             uint8_t value = (uint8_t)Serial2.read();
             receiveRadarByte(value);
         }
 #endif
-        // Yield to the RTOS scheduler
+        // Yield 5ms to RTOS scheduler so Bluetooth/HUD tasks can run
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 }

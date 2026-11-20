@@ -3,12 +3,12 @@
 
 #include <Arduino.h>
 
-// Shared structure to pass target data through the FreeRTOS Queue
+// threat packet struct to send over BLE
 struct VehicleThreat {
-    float distance_m;
-    float approach_angle_deg;
-    float closing_speed_mps;
-    bool isValid;
+    float distance_m; // distance to object in meters
+    float approach_angle_deg; // angle of approach in degrees (TODO: verify)
+    float closing_speed_mps; // closing speed in meters per second
+    bool isThreat; // true if object detected is threat, based on threshold 
 };
 
 // Declare the external queue so radar.cpp can push to it, and ble.cpp can read from it
