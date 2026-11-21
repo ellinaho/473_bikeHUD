@@ -1,3 +1,4 @@
+import os
 import sys
 import threading
 import queue
@@ -9,6 +10,7 @@ from gps import PA1616D_GPS
 from encoder import HUDEncoder, HUDMode, HUDAction
 from ble_watchdog import ble_worker
 from display import SixVisionDisplay, update_display_data
+import web_view
 
 # --- Global State Struct ---
 class HUDState:
@@ -69,7 +71,12 @@ def main():
 
     # Initialize graphics engine using the new display implementation
     # --window: 640x360 window instead of fullscreen (e.g. X11-forwarded over ssh -Y)
-    if "--window" in sys.argv:
+    # --web: no window at all; view the HUD in a browser at http://<pi-address>:8000
+    web = "--web" in sys.argv
+    if web:
+        os.environ["SDL_VIDEODRIVER"] = "dummy"
+        web_view.start()
+    if web or "--window" in sys.argv:
         display = SixVisionDisplay(width=640, height=360, fullscreen=False)
     else:
         display = SixVisionDisplay()
@@ -124,6 +131,8 @@ def main():
 
             # render will now respect the display object's own on/off state
             display.render()
+            if web:
+                web_view.publish(display.screen)
             
     except KeyboardInterrupt:
         print("\nShutting down HUD Engine.")
